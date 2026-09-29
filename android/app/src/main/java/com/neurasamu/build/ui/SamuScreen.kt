@@ -87,9 +87,10 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary)
             }
-            if (state.errorDetail != null) {
+            val errDetail = state.errorDetail
+            if (errDetail != null) {
                 Spacer(Modifier.height(8.dp))
-                ErrorBox(state.errorDetail, onShowLogs = { vm.viewLogs(); showLogs = true }, onDismiss = vm::clearError)
+                ErrorBox(errDetail, onShowLogs = { vm.viewLogs(); showLogs = true }, onDismiss = vm::clearError)
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
