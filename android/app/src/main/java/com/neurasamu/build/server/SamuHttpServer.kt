@@ -4,12 +4,7 @@ import android.content.Context
 import fi.iki.elonen.NanoHTTPD
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayInputStream
-import java.io.InputStream
-import java.io.PipedInputStream
-import java.io.PipedOutputStream
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
+import java.io.OutputStream
 
 class SamuHttpServer(
     private val ctx: Context,
@@ -18,8 +13,6 @@ class SamuHttpServer(
 
     @Volatile var apiKey: String? = null
     @Volatile var displayNameOverride: String? = null
-
-    private val pool = Executors.newCachedThreadPool()
 
     override fun serve(session: IHTTPSession): Response {
         return try {
@@ -67,18 +60,13 @@ class SamuHttpServer(
 
         val messages = node.optJSONArray("messages")
             ?: return err(Response.Status.BAD_REQUEST, "messages[] required")
-        val modelIn = node.optString("model", "")
-        if (modelIn.isNotBlank() && modelIn != activeName() && modelIn != "any") {
-            // Accept any model name for compatibility, but log mismatch
-        }
-
         val prompt = buildChatPrompt(messages)
         val maxTokens = node.optInt("max_tokens", 512).coerceIn(1, 4096)
         val temperature = node.optDouble("temperature", 0.7)
         val topP = node.optDouble("top_p", 0.9)
         val stream = node.optBoolean("stream", false)
 
-        return if (stream) streamChat(session, prompt, maxTokens, temperature, topP)
+        return if (stream) streamChat(prompt, maxTokens, temperature, topP)
         else fullChat(prompt, maxTokens, temperature, topP)
     }
 
@@ -97,7 +85,7 @@ class SamuHttpServer(
         val topP = node.optDouble("top_p", 0.9)
         val stream = node.optBoolean("stream", false)
 
-        return if (stream) streamChat(session, prompt, maxTokens, temperature, topP)
+        return if (stream) streamChat(prompt, maxTokens, temperature, topP)
         else fullChat(prompt, maxTokens, temperature, topP)
     }
 
@@ -133,36 +121,61 @@ class SamuHttpServer(
         return json(Response.Status.OK, body)
     }
 
-    private fun streamChat(session: IHTTPSession, prompt: String, maxTokens: Int,
+    /**
+     * Streaming via direct socket write. Bypasses NanoHTTPD's pipe-based
+     * chunked response, which deadlocks with cross-thread producers.
+     */
+    private fun streamChat(prompt: String, maxTokens: Int,
                            temperature: Double, topP: Double): Response {
-        val pipeIn = PipedInputStream(64 * 1024)
-        val pipeOut = PipedOutputStream(pipeIn)
-        val stopped = AtomicBoolean(false)
+        val id = "chatcmpl-samu-${System.currentTimeMillis()}"
+        val created = System.currentTimeMillis() / 1000
+        val model = activeName()
 
-        pool.submit {
-            try {
-                val id = "chatcmpl-samu-${System.currentTimeMillis()}"
-                val created = System.currentTimeMillis() / 1000
-                val model = activeName()
+        return object : Response(Response.Status.OK, "text/event-stream", null, -1) {
+            override fun send(outputStream: OutputStream) {
+                try {
+                    // status line + headers
+                    val headers = buildString {
+                        append("HTTP/1.1 200 OK\r\n")
+                        append("Content-Type: text/event-stream; charset=utf-8\r\n")
+                        append("Cache-Control: no-cache\r\n")
+                        append("Access-Control-Allow-Origin: *\r\n")
+                        append("Access-Control-Allow-Headers: Content-Type, Authorization\r\n")
+                        append("Connection: close\r\n")
+                        append("Transfer-Encoding: chunked\r\n")
+                        append("\r\n")
+                    }
+                    outputStream.write(headers.toByteArray())
+                    outputStream.flush()
 
-                val first = JSONObject().apply {
-                    put("id", id); put("object", "chat.completion.chunk")
-                    put("created", created); put("model", model)
-                    put("choices", JSONArray().put(JSONObject().apply {
-                        put("index", 0)
-                        put("delta", JSONObject().put("role", "assistant"))
-                        put("finish_reason", JSONObject.NULL)
-                    }))
-                }
-                pipeOut.write("data: $first\n\n".toByteArray())
+                    fun writeChunk(s: String) {
+                        val bytes = s.toByteArray(Charsets.UTF_8)
+                        outputStream.write(Integer.toHexString(bytes.size).toByteArray())
+                        outputStream.write("\r\n".toByteArray())
+                        outputStream.write(bytes)
+                        outputStream.write("\r\n".toByteArray())
+                        outputStream.flush()
+                    }
 
-                SamuEngine.generate(
-                    prompt = prompt,
-                    maxTokens = maxTokens,
-                    temperature = temperature,
-                    topP = topP,
-                    onToken = { tok ->
-                        if (!stopped.get()) {
+                    fun sse(obj: JSONObject) = writeChunk("data: $obj\n\n")
+
+                    val first = JSONObject().apply {
+                        put("id", id); put("object", "chat.completion.chunk")
+                        put("created", created); put("model", model)
+                        put("choices", JSONArray().put(JSONObject().apply {
+                            put("index", 0)
+                            put("delta", JSONObject().put("role", "assistant"))
+                            put("finish_reason", JSONObject.NULL)
+                        }))
+                    }
+                    sse(first)
+
+                    SamuEngine.generate(
+                        prompt = prompt,
+                        maxTokens = maxTokens,
+                        temperature = temperature,
+                        topP = topP,
+                        onToken = { tok ->
                             val chunk = JSONObject().apply {
                                 put("id", id); put("object", "chat.completion.chunk")
                                 put("created", created); put("model", model)
@@ -172,35 +185,36 @@ class SamuHttpServer(
                                     put("finish_reason", JSONObject.NULL)
                                 }))
                             }
-                            try { pipeOut.write("data: $chunk\n\n".toByteArray()) } catch (_: Exception) {}
+                            sse(chunk)
                         }
-                    }
-                )
+                    )
 
-                val end = JSONObject().apply {
-                    put("id", id); put("object", "chat.completion.chunk")
-                    put("created", created); put("model", model)
-                    put("choices", JSONArray().put(JSONObject().apply {
-                        put("index", 0)
-                        put("delta", JSONObject())
-                        put("finish_reason", "stop")
-                    }))
+                    val end = JSONObject().apply {
+                        put("id", id); put("object", "chat.completion.chunk")
+                        put("created", created); put("model", model)
+                        put("choices", JSONArray().put(JSONObject().apply {
+                            put("index", 0)
+                            put("delta", JSONObject())
+                            put("finish_reason", "stop")
+                        }))
+                    }
+                    sse(end)
+                    writeChunk("data: [DONE]\n\n")
+                    writeChunk("")   // terminates chunked stream
+                } catch (e: Exception) {
+                    try {
+                        val err = "data: {\"error\":${JSONObject.quote(e.message ?: "err")}}\n\n"
+                        val b = err.toByteArray()
+                        outputStream.write(Integer.toHexString(b.size).toByteArray())
+                        outputStream.write("\r\n".toByteArray())
+                        outputStream.write(b)
+                        outputStream.write("\r\n".toByteArray())
+                        outputStream.write("0\r\n\r\n".toByteArray())
+                        outputStream.flush()
+                    } catch (_: Exception) {}
                 }
-                pipeOut.write("data: $end\n\n".toByteArray())
-                pipeOut.write("data: [DONE]\n\n".toByteArray())
-                pipeOut.flush()
-            } catch (e: Exception) {
-                try { pipeOut.write("data: {\"error\":${JSONObject.quote(e.message ?: "err")}}\n\n".toByteArray()) } catch (_: Exception) {}
-            } finally {
-                try { pipeOut.close() } catch (_: Exception) {}
             }
         }
-
-        val resp = newChunkedResponse(Response.Status.OK, "text/event-stream", pipeIn)
-        resp.addHeader("Cache-Control", "no-cache")
-        resp.addHeader("X-Accel-Buffering", "no")
-        addCors(resp)
-        return resp
     }
 
     private fun buildChatPrompt(messages: JSONArray): String {
@@ -209,14 +223,13 @@ class SamuHttpServer(
             val m = messages.getJSONObject(i)
             val role = m.optString("role", "user")
             val content = m.optString("content", "")
-            sb.append("<start_of_turn>").append(role).append("\n")
+            val r = when (role) { "assistant" -> "model"; "system" -> "user"; else -> role }
+            sb.append("<start_of_turn>").append(r).append("\n")
             sb.append(content).append("<end_of_turn>\n")
         }
         sb.append("<start_of_turn>model\n")
         return sb.toString()
     }
-
-    private fun quote(s: String) = JSONObject.quote(s)
 
     private fun json(status: Response.Status, body: String): Response {
         val r = newFixedLengthResponse(status, "application/json; charset=utf-8", body)
