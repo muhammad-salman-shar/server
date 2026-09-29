@@ -1,0 +1,13 @@
+server/samuserve
+server/samuserve-*
+*.exe
+models/*/
+!models/.gitkeep
+app/.gradle/
+app/build/
+app/local.properties
+*.apk
+*.aab
+.env
+*.pem
+.DS_Store
