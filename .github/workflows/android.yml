@@ -1,0 +1,71 @@
+name: android
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache llama.cpp
+        uses: actions/cache@v4
+        with:
+          path: llama.cpp
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('.github/workflows/android.yml') }}
+
+      - name: Clone llama.cpp
+        run: |
+          if [ ! -d llama.cpp ]; then
+            git clone --depth 1 https://github.com/ggerganov/llama.cpp.git
+          fi
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r26d
+
+      - name: Build llama-server (arm64)
+        run: |
+          cd llama.cpp
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE=${{ steps.ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLLAMA_CURL=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=ON \
+            -DLLAMA_BUILD_SERVER=ON
+          cmake --build build --config Release --target llama-server -j
+          mkdir -p $GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a
+          cp build/bin/llama-server $GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a/libllama-server.so
+          # Copy all shared libs as .so
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew 2>/dev/null || true
+          gradle wrapper --gradle-version 8.10.2 2>/dev/null || true
+          gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: samu-lab-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

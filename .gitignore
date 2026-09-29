@@ -11,3 +11,17 @@ app/local.properties
 .env
 *.pem
 .DS_Store
+
+# android build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/.kotlin/
+android/app/src/main/jniLibs/
+.gradle/
+
+# local runtime
+bin/
+config.yaml
+samu.log

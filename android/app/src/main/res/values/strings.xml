@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">SaMu Lab</string>
+    <string name="notif_channel_name">SaMu Server</string>
+    <string name="notif_channel_desc">Local model server running</string>
+</resources>
