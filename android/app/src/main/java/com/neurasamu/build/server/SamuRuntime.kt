@@ -4,20 +4,12 @@ import android.content.Context
 import com.neurasamu.build.model.SamuModel
 
 object SamuRuntime {
-    @Volatile private var engine: LlamaEngine? = null
     @Volatile private var http: SamuHttpServer? = null
     @Volatile var port: Int = 8080
         private set
 
-    fun engine(ctx: Context): LlamaEngine {
-        engine?.let { return it }
-        synchronized(this) {
-            engine?.let { return it }
-            val e = LlamaEngine(ctx.applicationContext)
-            engine = e
-            return e
-        }
-    }
+    @Volatile var activeModel: SamuModel? = null
+        private set
 
     fun httpOrNull(): SamuHttpServer? = http
 
@@ -25,10 +17,25 @@ object SamuRuntime {
         http?.let { return it }
         synchronized(this) {
             http?.let { return it }
-            val h = SamuHttpServer(ctx.applicationContext, engine(ctx), port)
+            val h = SamuHttpServer(ctx.applicationContext, port)
             http = h
             return h
         }
+    }
+
+    fun loadModel(ctx: Context, model: SamuModel, threads: Int = 4) {
+        SamuEngine.loadModel(
+            path = model.file.absolutePath,
+            threads = threads,
+            ctx = model.ctx,
+            gpuLayers = 0
+        )
+        activeModel = model
+    }
+
+    fun unloadModel() {
+        try { SamuEngine.unload() } catch (_: Exception) {}
+        activeModel = null
     }
 
     fun startServer(ctx: Context, model: SamuModel): String {
@@ -40,8 +47,8 @@ object SamuRuntime {
 
     fun stopAll() {
         try { http?.stop() } catch (_: Exception) {}
-        try { engine?.stop() } catch (_: Exception) {}
+        try { SamuEngine.unload() } catch (_: Exception) {}
         http = null
-        engine = null
+        activeModel = null
     }
 }

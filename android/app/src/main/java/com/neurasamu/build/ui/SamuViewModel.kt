@@ -6,7 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.neurasamu.build.model.ModelStore
 import com.neurasamu.build.model.SamuModel
+import com.neurasamu.build.server.SamuEngine
 import com.neurasamu.build.server.SamuRuntime
+import com.neurasamu.build.server.SamuServerService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,8 +28,7 @@ data class UiState(
     val busyLabel: String = "",
     val message: String? = null,
     val errorDetail: String? = null,
-    val selfTestResult: String? = null,
-    val logTail: String = ""
+    val selfTestResult: String? = null
 )
 
 class SamuViewModel(app: Application) : AndroidViewModel(app) {
@@ -61,9 +62,15 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun runSelfTest() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, busyLabel = "Self-test…")
-            val engine = SamuRuntime.engine(getApplication())
-            val out = withContext(Dispatchers.IO) { engine.selfTest() }
+            _state.value = _state.value.copy(busy = true, busyLabel = "GPU detect + JNI check…")
+            val out = withContext(Dispatchers.IO) {
+                buildString {
+                    appendLine("=== SamuEngine JNI self-test ===")
+                    appendLine("Lib loaded: ${SamuEngine.isLoaded}")
+                    appendLine("GPU: ${runCatching { SamuEngine.detectGpu() }.getOrElse { "err: ${it.message}" }}")
+                    appendLine("Context: ${runCatching { SamuEngine.contextSize() }.getOrElse { -1 }}")
+                }
+            }
             _state.value = _state.value.copy(busy = false, busyLabel = "", selfTestResult = out)
         }
     }
@@ -71,26 +78,24 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
     fun loadModel(m: SamuModel) {
         viewModelScope.launch {
             _state.value = _state.value.copy(
-                busy = true, busyLabel = "Loading ${m.displayName}… (up to 5 min)",
+                busy = true,
+                busyLabel = "Loading ${m.displayName}… (2-5 min)",
                 message = null, errorDetail = null
             )
             try {
-                val engine = SamuRuntime.engine(getApplication())
-                withContext(Dispatchers.IO) { engine.ensureLoaded(m) }
-                _state.value = _state.value.copy(
-                    busy = false, busyLabel = "",
-                    active = m, modelName = m.displayName,
-                    message = "Model active"
-                )
-            } catch (e: Exception) {
-                val logTail = withContext(Dispatchers.IO) {
-                    SamuRuntime.engine(getApplication()).readLogTail(60)
+                withContext(Dispatchers.IO) {
+                    SamuRuntime.loadModel(getApplication(), m)
                 }
                 _state.value = _state.value.copy(
                     busy = false, busyLabel = "",
+                    active = m, modelName = m.displayName,
+                    message = "Model active — press Start"
+                )
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    busy = false, busyLabel = "",
                     message = "Load failed",
-                    errorDetail = e.message ?: "unknown",
-                    logTail = logTail
+                    errorDetail = "${e.javaClass.simpleName}: ${e.message}"
                 )
             }
         }
@@ -103,10 +108,12 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
                 val base = SamuRuntime.startServer(getApplication(), m)
                 SamuRuntime.http(getApplication()).apiKey = _state.value.apiKey
                 SamuRuntime.http(getApplication()).displayNameOverride = _state.value.modelName
-                val i = android.content.Intent(getApplication(), com.neurasamu.build.server.SamuServerService::class.java)
-                i.putExtra(com.neurasamu.build.server.SamuServerService.EXTRA_PORT, SamuRuntime.port)
-                i.putExtra(com.neurasamu.build.server.SamuServerService.EXTRA_MODEL, m.displayName)
+
+                val i = android.content.Intent(getApplication(), SamuServerService::class.java)
+                i.putExtra(SamuServerService.EXTRA_PORT, SamuRuntime.port)
+                i.putExtra(SamuServerService.EXTRA_MODEL, m.displayName)
                 androidx.core.content.ContextCompat.startForegroundService(getApplication(), i)
+
                 _state.value = _state.value.copy(
                     serverRunning = true, url = base, message = "Server started"
                 )
@@ -120,11 +127,11 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun stopServer() {
-        val i = android.content.Intent(getApplication(), com.neurasamu.build.server.SamuServerService::class.java)
-            .setAction(com.neurasamu.build.server.SamuServerService.ACTION_STOP)
+        val i = android.content.Intent(getApplication(), SamuServerService::class.java)
+            .setAction(SamuServerService.ACTION_STOP)
         getApplication<Application>().startService(i)
         SamuRuntime.stopAll()
-        _state.value = _state.value.copy(serverRunning = false, message = "Server stopped")
+        _state.value = _state.value.copy(serverRunning = false, active = null, message = "Server stopped")
     }
 
     fun delete(m: SamuModel) {
@@ -146,17 +153,7 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
         SamuRuntime.httpOrNull()?.apiKey = k
     }
 
-    fun viewLogs() {
-        val tail = SamuRuntime.engine(getApplication()).readLogTail(200)
-        _state.value = _state.value.copy(logTail = tail)
-    }
-
     fun clearError() {
         _state.value = _state.value.copy(message = null, errorDetail = null)
-    }
-
-    fun clearLogs() {
-        SamuRuntime.engine(getApplication()).clearLog()
-        _state.value = _state.value.copy(logTail = "(cleared)")
     }
 }

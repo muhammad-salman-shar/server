@@ -38,7 +38,6 @@ import com.neurasamu.build.model.SamuModel
 fun SamuRoot(vm: SamuViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
-    var showLogs by remember { mutableStateOf(false) }
     var showSelfTest by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(
@@ -90,24 +89,12 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
             val errDetail = state.errorDetail
             if (errDetail != null) {
                 Spacer(Modifier.height(8.dp))
-                ErrorBox(errDetail, onShowLogs = { vm.viewLogs(); showLogs = true }, onDismiss = vm::clearError)
-            }
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { vm.viewLogs(); showLogs = true }) {
-                    Text("View engine logs")
-                }
-                TextButton(onClick = { vm.runSelfTest(); showSelfTest = true }) {
-                    Text("Self-test")
-                }
+                ErrorBox(errDetail, onDismiss = vm::clearError)
             }
             Spacer(Modifier.height(80.dp))
         }
     }
 
-    if (showLogs) {
-        LogsDialog(state.logTail, onDismiss = { showLogs = false }, onClear = vm::clearLogs, onRefresh = vm::viewLogs)
-    }
     if (showSelfTest) {
         SelfTestDialog(state.selfTestResult, state.busy, onDismiss = { showSelfTest = false })
     }
@@ -174,7 +161,7 @@ private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context) {
 }
 
 @Composable
-private fun ErrorBox(detail: String, onShowLogs: () -> Unit, onDismiss: () -> Unit) {
+private fun ErrorBox(detail: String, onDismiss: () -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF3B1212)),
@@ -184,12 +171,9 @@ private fun ErrorBox(detail: String, onShowLogs: () -> Unit, onDismiss: () -> Un
             Text("Error", color = Color(0xFFFF8080), fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text(detail, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                color = Color(0xFFEDEDED), maxLines = 8)
+                color = Color(0xFFEDEDED), maxLines = 12)
             Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onShowLogs) { Text("Full logs") }
-                TextButton(onClick = onDismiss) { Text("Dismiss") }
-            }
+            TextButton(onClick = onDismiss) { Text("Dismiss") }
         }
     }
 }
@@ -232,31 +216,10 @@ private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel) {
 }
 
 @Composable
-private fun LogsDialog(log: String, onDismiss: () -> Unit, onClear: () -> Unit, onRefresh: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Engine logs") },
-        text = {
-            Box(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
-                Text(log.ifEmpty { "(empty)" }, fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp, modifier = Modifier.horizontalScroll(rememberScrollState()))
-            }
-        },
-        confirmButton = { TextButton(onClick = onRefresh) { Text("Refresh") } },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onClear) { Text("Clear") }
-                TextButton(onClick = onDismiss) { Text("Close") }
-            }
-        }
-    )
-}
-
-@Composable
 private fun SelfTestDialog(result: String?, busy: Boolean, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("llama-server self-test") },
+        title = { Text("SamuEngine self-test") },
         text = {
             if (busy || result == null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -266,7 +229,7 @@ private fun SelfTestDialog(result: String?, busy: Boolean, onDismiss: () -> Unit
                 }
             } else {
                 Box(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
-                    Text(result, fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                    Text(result, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                         modifier = Modifier.horizontalScroll(rememberScrollState()))
                 }
             }
