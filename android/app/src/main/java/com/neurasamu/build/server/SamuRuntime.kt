@@ -3,7 +3,6 @@ package com.neurasamu.build.server
 import android.content.Context
 import com.neurasamu.build.model.SamuModel
 
-/** Process-wide singletons so service + activity share engine + http server. */
 object SamuRuntime {
     @Volatile private var engine: LlamaEngine? = null
     @Volatile private var http: SamuHttpServer? = null
@@ -20,6 +19,8 @@ object SamuRuntime {
         }
     }
 
+    fun httpOrNull(): SamuHttpServer? = http
+
     fun http(ctx: Context): SamuHttpServer {
         http?.let { return it }
         synchronized(this) {
@@ -32,7 +33,7 @@ object SamuRuntime {
 
     fun startServer(ctx: Context, model: SamuModel): String {
         val h = http(ctx)
-        try { h.startSafe() } catch (_: Exception) { /* already started */ }
+        try { h.startSafe() } catch (_: Exception) {}
         h.displayNameOverride = model.displayName
         return "http://0.0.0.0:$port"
     }

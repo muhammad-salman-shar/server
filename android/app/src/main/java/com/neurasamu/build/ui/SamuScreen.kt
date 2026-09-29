@@ -6,12 +6,15 @@ import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
@@ -25,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neurasamu.build.model.SamuModel
@@ -34,6 +38,8 @@ import com.neurasamu.build.model.SamuModel
 fun SamuRoot(vm: SamuViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
+    var showLogs by remember { mutableStateOf(false) }
+    var showSelfTest by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -43,6 +49,11 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
         topBar = {
             TopAppBar(
                 title = { Text("SaMu Lab", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { vm.runSelfTest(); showSelfTest = true }) {
+                        Icon(Icons.Default.BugReport, "self-test")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -57,10 +68,7 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
         }
     ) { pad ->
         Column(
-            Modifier
-                .fillMaxSize()
-                .padding(pad)
-                .padding(horizontal = 16.dp)
+            Modifier.fillMaxSize().padding(pad).padding(horizontal = 16.dp)
         ) {
             ServerCard(state, vm, ctx)
             Spacer(Modifier.height(12.dp))
@@ -79,8 +87,28 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary)
             }
+            if (state.errorDetail != null) {
+                Spacer(Modifier.height(8.dp))
+                ErrorBox(state.errorDetail, onShowLogs = { vm.viewLogs(); showLogs = true }, onDismiss = vm::clearError)
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { vm.viewLogs(); showLogs = true }) {
+                    Text("View engine logs")
+                }
+                TextButton(onClick = { vm.runSelfTest(); showSelfTest = true }) {
+                    Text("Self-test")
+                }
+            }
             Spacer(Modifier.height(80.dp))
         }
+    }
+
+    if (showLogs) {
+        LogsDialog(state.logTail, onDismiss = { showLogs = false }, onClear = vm::clearLogs, onRefresh = vm::viewLogs)
+    }
+    if (showSelfTest) {
+        SelfTestDialog(state.selfTestResult, state.busy, onDismiss = { showSelfTest = false })
     }
 }
 
@@ -93,18 +121,12 @@ private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context) {
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(10.dp)
-                        .background(
-                            if (s.serverRunning) Color(0xFF22C55E) else Color(0xFF6B7280),
-                            RoundedCornerShape(50)
-                ))
+                Box(Modifier.size(10.dp).background(
+                    if (s.serverRunning) Color(0xFF22C55E) else Color(0xFF6B7280),
+                    RoundedCornerShape(50)))
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    if (s.serverRunning) "Server running" else "Server stopped",
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text(if (s.serverRunning) "Server running" else "Server stopped",
+                    fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -135,17 +157,37 @@ private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context) {
                     enabled = s.active != null,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        if (s.serverRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        null
-                    )
+                    Icon(if (s.serverRunning) Icons.Default.Stop else Icons.Default.PlayArrow, null)
                     Spacer(Modifier.width(6.dp))
                     Text(if (s.serverRunning) "Stop" else "Start")
                 }
             }
             if (s.busy) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 LinearProgressIndicator(Modifier.fillMaxWidth())
+                Spacer(Modifier.height(4.dp))
+                Text(s.busyLabel, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorBox(detail: String, onShowLogs: () -> Unit, onDismiss: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF3B1212)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("Error", color = Color(0xFFFF8080), fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(detail, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                color = Color(0xFFEDEDED), maxLines = 8)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onShowLogs) { Text("Full logs") }
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
             }
         }
     }
@@ -155,12 +197,8 @@ private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context) {
 private fun CopyRow(label: String, value: String, ctx: Context) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("$label: ", fontWeight = FontWeight.Medium)
-        Text(
-            value,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.weight(1f),
-            maxLines = 1
-        )
+        Text(value, fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f), maxLines = 1)
         IconButton(onClick = {
             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText(label, value))
@@ -177,16 +215,12 @@ private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel) {
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(m.displayName, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "%.1f MB".format(m.sizeBytes / 1_048_576.0),
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text("%.1f MB".format(m.sizeBytes / 1_048_576.0),
+                    style = MaterialTheme.typography.bodySmall)
                 if (active) Text("ACTIVE", color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelSmall)
             }
@@ -194,4 +228,48 @@ private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel) {
             IconButton(onClick = { vm.delete(m) }) { Icon(Icons.Default.Delete, null) }
         }
     }
+}
+
+@Composable
+private fun LogsDialog(log: String, onDismiss: () -> Unit, onClear: () -> Unit, onRefresh: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Engine logs") },
+        text = {
+            Box(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                Text(log.ifEmpty { "(empty)" }, fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp, modifier = Modifier.horizontalScroll(rememberScrollState()))
+            }
+        },
+        confirmButton = { TextButton(onClick = onRefresh) { Text("Refresh") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onClear) { Text("Clear") }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        }
+    )
+}
+
+@Composable
+private fun SelfTestDialog(result: String?, busy: Boolean, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("llama-server self-test") },
+        text = {
+            if (busy || result == null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Running…")
+                }
+            } else {
+                Box(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                    Text(result, fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                        modifier = Modifier.horizontalScroll(rememberScrollState()))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
 }

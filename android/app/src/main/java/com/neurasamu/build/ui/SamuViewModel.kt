@@ -23,7 +23,11 @@ data class UiState(
     val apiKey: String = "samu-" + UUID.randomUUID().toString().take(8),
     val modelName: String = "",
     val busy: Boolean = false,
-    val message: String? = null
+    val busyLabel: String = "",
+    val message: String? = null,
+    val errorDetail: String? = null,
+    val selfTestResult: String? = null,
+    val logTail: String = ""
 )
 
 class SamuViewModel(app: Application) : AndroidViewModel(app) {
@@ -40,31 +44,54 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun importModel(uri: Uri) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, message = "Importing…")
+            _state.value = _state.value.copy(busy = true, busyLabel = "Importing…", message = null, errorDetail = null)
             try {
                 val m = ModelStore.import(getApplication(), uri)
-                _state.value = _state.value.copy(busy = false, message = "Added ${m.displayName}")
+                _state.value = _state.value.copy(busy = false, busyLabel = "", message = "Added ${m.displayName}")
                 refresh()
             } catch (e: Exception) {
-                _state.value = _state.value.copy(busy = false, message = "Import failed: ${e.message}")
+                _state.value = _state.value.copy(
+                    busy = false, busyLabel = "",
+                    message = "Import failed",
+                    errorDetail = "${e.javaClass.simpleName}: ${e.message}"
+                )
             }
+        }
+    }
+
+    fun runSelfTest() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, busyLabel = "Self-test…")
+            val engine = SamuRuntime.engine(getApplication())
+            val out = withContext(Dispatchers.IO) { engine.selfTest() }
+            _state.value = _state.value.copy(busy = false, busyLabel = "", selfTestResult = out)
         }
     }
 
     fun loadModel(m: SamuModel) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, message = "Loading ${m.displayName}…")
+            _state.value = _state.value.copy(
+                busy = true, busyLabel = "Loading ${m.displayName}… (up to 5 min)",
+                message = null, errorDetail = null
+            )
             try {
                 val engine = SamuRuntime.engine(getApplication())
                 withContext(Dispatchers.IO) { engine.ensureLoaded(m) }
                 _state.value = _state.value.copy(
-                    busy = false,
-                    active = m,
-                    modelName = m.displayName,
+                    busy = false, busyLabel = "",
+                    active = m, modelName = m.displayName,
                     message = "Model active"
                 )
             } catch (e: Exception) {
-                _state.value = _state.value.copy(busy = false, message = "Load failed: ${e.message}")
+                val logTail = withContext(Dispatchers.IO) {
+                    SamuRuntime.engine(getApplication()).readLogTail(60)
+                }
+                _state.value = _state.value.copy(
+                    busy = false, busyLabel = "",
+                    message = "Load failed",
+                    errorDetail = e.message ?: "unknown",
+                    logTail = logTail
+                )
             }
         }
     }
@@ -75,23 +102,26 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val base = SamuRuntime.startServer(getApplication(), m)
                 SamuRuntime.http(getApplication()).apiKey = _state.value.apiKey
+                SamuRuntime.http(getApplication()).displayNameOverride = _state.value.modelName
                 val i = android.content.Intent(getApplication(), com.neurasamu.build.server.SamuServerService::class.java)
                 i.putExtra(com.neurasamu.build.server.SamuServerService.EXTRA_PORT, SamuRuntime.port)
                 i.putExtra(com.neurasamu.build.server.SamuServerService.EXTRA_MODEL, m.displayName)
                 androidx.core.content.ContextCompat.startForegroundService(getApplication(), i)
                 _state.value = _state.value.copy(
-                    serverRunning = true,
-                    url = base,
-                    message = "Server started"
+                    serverRunning = true, url = base, message = "Server started"
                 )
             } catch (e: Exception) {
-                _state.value = _state.value.copy(message = "Server failed: ${e.message}")
+                _state.value = _state.value.copy(
+                    message = "Server failed",
+                    errorDetail = "${e.javaClass.simpleName}: ${e.message}"
+                )
             }
         }
     }
 
     fun stopServer() {
-        val i = android.content.Intent(getApplication(), com.neurasamu.build.server.SamuServerService::class.java).setAction(com.neurasamu.build.server.SamuServerService.ACTION_STOP)
+        val i = android.content.Intent(getApplication(), com.neurasamu.build.server.SamuServerService::class.java)
+            .setAction(com.neurasamu.build.server.SamuServerService.ACTION_STOP)
         getApplication<Application>().startService(i)
         SamuRuntime.stopAll()
         _state.value = _state.value.copy(serverRunning = false, message = "Server stopped")
@@ -108,9 +138,25 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateModelName(name: String) {
         _state.value = _state.value.copy(modelName = name)
+        SamuRuntime.httpOrNull()?.displayNameOverride = name
     }
 
     fun updateApiKey(k: String) {
         _state.value = _state.value.copy(apiKey = k)
+        SamuRuntime.httpOrNull()?.apiKey = k
+    }
+
+    fun viewLogs() {
+        val tail = SamuRuntime.engine(getApplication()).readLogTail(200)
+        _state.value = _state.value.copy(logTail = tail)
+    }
+
+    fun clearError() {
+        _state.value = _state.value.copy(message = null, errorDetail = null)
+    }
+
+    fun clearLogs() {
+        SamuRuntime.engine(getApplication()).clearLog()
+        _state.value = _state.value.copy(logTail = "(cleared)")
     }
 }

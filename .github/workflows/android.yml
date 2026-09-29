@@ -13,11 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r26d
+
       - name: Cache llama.cpp
         uses: actions/cache@v4
         with:
           path: llama.cpp
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('.github/workflows/android.yml') }}
+          key: llama-cpp-r26d-v2-${{ runner.os }}
 
       - name: Clone llama.cpp
         run: |
@@ -25,28 +31,55 @@ jobs:
             git clone --depth 1 https://github.com/ggerganov/llama.cpp.git
           fi
 
-      - name: Setup NDK
-        uses: nttld/setup-ndk@v1
-        id: ndk
-        with:
-          ndk-version: r26d
-
-      - name: Build llama-server (arm64)
+      - name: Build llama-server (arm64, static STL)
         run: |
+          NDK="${{ steps.ndk.outputs.ndk-path }}"
           cd llama.cpp
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=${{ steps.ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake \
+          cmake -B build-android \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_static \
             -DBUILD_SHARED_LIBS=OFF \
             -DLLAMA_CURL=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=ON \
-            -DLLAMA_BUILD_SERVER=ON
-          cmake --build build --config Release --target llama-server -j
-          mkdir -p $GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a
-          cp build/bin/llama-server $GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a/libllama-server.so
-          # Copy all shared libs as .so
+            -DLLAMA_BUILD_SERVER=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android --config Release --target llama-server -j
+
+      - name: Verify binary (Android ARM64 target)
+        run: |
+          NDK="${{ steps.ndk.outputs.ndk-path }}"
+          TOOLS="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          BIN="llama.cpp/build-android/bin/llama-server"
+
+          echo "===== file ====="
+          file "$BIN"
+
+          echo "===== soname / interpreter ====="
+          "$TOOLS/llvm-readelf" -h "$BIN" | grep -E "Type|Machine"
+          "$TOOLS/llvm-readelf" -l "$BIN" | grep -E "INTERP|Requesting" || true
+
+          echo "===== DT_NEEDED ====="
+          "$TOOLS/llvm-readelf" -d "$BIN" | grep NEEDED || echo "(none — fully static)"
+
+          echo "===== fail if libc++_shared.so still needed ====="
+          if "$TOOLS/llvm-readelf" -d "$BIN" | grep -q "libc++_shared.so"; then
+            echo "ERROR: binary still links libc++_shared.so — build failed STL static"
+            exit 1
+          fi
+
+          echo "===== binary size ====="
+          ls -lh "$BIN"
+
+      - name: Stage jniLibs
+        run: |
+          DST="$GITHUB_WORKSPACE/android/app/src/main/jniLibs/arm64-v8a"
+          mkdir -p "$DST"
+          cp llama.cpp/build-android/bin/llama-server "$DST/libllama-server.so"
+          chmod +x "$DST/libllama-server.so"
+          ls -lh "$DST"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -63,6 +96,14 @@ jobs:
           chmod +x gradlew 2>/dev/null || true
           gradle wrapper --gradle-version 8.10.2 2>/dev/null || true
           gradle assembleDebug --no-daemon
+
+      - name: Verify APK contents
+        run: |
+          APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "APK: $APK"
+          unzip -l "$APK" | grep -E "libllama-server.so|libc\+\+" || true
+          echo "===== verify libllama-server.so is in APK ====="
+          unzip -l "$APK" | grep "libllama-server.so" || { echo "MISSING"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
