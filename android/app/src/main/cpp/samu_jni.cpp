@@ -209,7 +209,7 @@ Java_com_neurasamu_build_server_SamuEngine_nativeDetectGpu(
 extern "C" JNIEXPORT void JNICALL
 Java_com_neurasamu_build_server_SamuEngine_nativeLoadModel(
     JNIEnv* env, jobject thiz,
-    jstring path, jlong n_threads, jlong ctx_size, jlong n_gpu_layers,
+    jstring path, jlong n_threads, jlong n_threads_batch, jlong ctx_size, jlong n_gpu_layers,
     jobject progress_callback) {
     
     if (!path) {
@@ -249,6 +249,8 @@ Java_com_neurasamu_build_server_SamuEngine_nativeLoadModel(
     // Model parameters
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = n_gpu_layers;
+    model_params.use_mlock = true;
+    model_params.use_mmap = true;
 
     llama_log_set(androidLlamaLog, nullptr);
     {
@@ -275,10 +277,14 @@ Java_com_neurasamu_build_server_SamuEngine_nativeLoadModel(
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = ctx_size;
     ctx_params.n_threads = n_threads;
-    ctx_params.n_threads_batch = n_threads;
+    ctx_params.n_threads_batch = n_threads_batch;
     
     // Memory optimization: reduce memory usage by limiting batch processing
-    ctx_params.n_batch = 512;  // Process smaller batches to reduce memory spikes
+    ctx_params.n_batch = 512;
+    ctx_params.n_ubatch = 512;
+    ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    ctx_params.type_k = GGML_TYPE_Q8_0;
+    ctx_params.type_v = GGML_TYPE_Q8_0;
 
     // Create context (using new API)
     g_ctx = llama_init_from_model(g_model, ctx_params);

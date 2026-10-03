@@ -2,10 +2,6 @@ package com.neurasamu.build.server
 
 import android.util.Log
 
-/**
- * JNI bridge to llama.cpp (bundled as libsamu_jni.so).
- * Must be kept in sync with app/src/main/cpp/samu_jni.cpp.
- */
 object SamuEngine {
 
     private const val TAG = "SamuEngine"
@@ -14,13 +10,12 @@ object SamuEngine {
         System.loadLibrary("samu_jni")
     }
 
-    // ---- JNI natives ----
-
     external fun nativeDetectGpu(outStats: LongArray): String
 
     external fun nativeLoadModel(
         path: String,
         nThreads: Long,
+        nThreadsBatch: Long,
         ctxSize: Long,
         nGpuLayers: Long,
         progressCallback: ((Any) -> Any)?
@@ -47,25 +42,23 @@ object SamuEngine {
     )
 
     external fun nativeStop()
-
     external fun nativeFreeModel()
-
     external fun nativeGetTokensUsed(): Int
-
     external fun nativeGetContextSize(): Int
-
     external fun nativeClearContext()
-
     external fun nativeSetSystemPromptLength(length: Int)
-
-    // ---- Kotlin wrappers ----
 
     @Volatile var isLoaded: Boolean = false
         private set
 
-    /** Load a GGUF model. Blocks until loaded. Throws RuntimeException on failure. */
-    fun loadModel(path: String, threads: Int, ctx: Int, gpuLayers: Int = 0,
-                  onProgress: ((Double) -> Unit)? = null) {
+    fun loadModel(
+        path: String,
+        threads: Int,
+        threadsBatch: Int,
+        ctx: Int,
+        gpuLayers: Int = 0,
+        onProgress: ((Double) -> Unit)? = null
+    ) {
         val cb: ((Any) -> Any)? = onProgress?.let { user ->
             { arg ->
                 val d = (arg as? Double) ?: 0.0
@@ -73,7 +66,14 @@ object SamuEngine {
                 Unit
             }
         }
-        nativeLoadModel(path, threads.toLong(), ctx.toLong(), gpuLayers.toLong(), cb)
+        nativeLoadModel(
+            path,
+            threads.toLong(),
+            threadsBatch.toLong(),
+            ctx.toLong(),
+            gpuLayers.toLong(),
+            cb
+        )
         isLoaded = true
     }
 
@@ -82,14 +82,10 @@ object SamuEngine {
     }
 
     fun stop() = nativeStop()
-
     fun clearContext() = nativeClearContext()
-
     fun tokensUsed(): Int = nativeGetTokensUsed()
-
     fun contextSize(): Int = nativeGetContextSize()
 
-    /** Stream tokens via [onToken]. Blocks until generation finishes or [stop] is called. */
     fun generate(
         prompt: String,
         maxTokens: Int = 512,
