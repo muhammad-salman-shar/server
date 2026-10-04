@@ -2,6 +2,7 @@ package com.neurasamu.build.engine
 
 import android.content.Context
 import android.util.Log
+import com.google.mediapipe.tasks.components.containers.ProgressListener
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
 import java.io.File
@@ -41,25 +42,21 @@ object LiteRtBridge {
                  topP: Double, onToken: (String) -> Unit) {
         val inf = inference ?: throw IllegalStateException("LiteRT model not loaded")
 
-        // MediaPipe async streaming API
         val latch = CountDownLatch(1)
         val err = AtomicReference<Throwable?>(null)
 
-        val listener = object : LlmInference.LlmInferenceListener {
-            override fun run(partialResult: String, done: Boolean) {
-                if (partialResult.isNotEmpty()) onToken(partialResult)
-                if (done) latch.countDown()
-            }
-
-            override fun onError(e: RuntimeException) {
-                err.set(e)
-                latch.countDown()
-            }
+        val listener = ProgressListener<String> { partialResult, done ->
+            if (partialResult.isNotEmpty()) onToken(partialResult)
+            if (done) latch.countDown()
         }
 
-        inf.generateResponseAsync(prompt, listener)
+        try {
+            inf.generateResponseAsync(prompt, listener)
+        } catch (e: Exception) {
+            err.set(e)
+            latch.countDown()
+        }
 
-        // Wait up to 10 minutes for generation
         if (!latch.await(10, TimeUnit.MINUTES)) {
             throw RuntimeException("LiteRT generation timed out")
         }
@@ -67,8 +64,7 @@ object LiteRtBridge {
     }
 
     fun stop() {
-        // MediaPipe doesn't expose cancel in 0.10.24; no-op
-        Log.i(TAG, "stop() called (no cancel API)")
+        Log.i(TAG, "stop() called (no cancel API in 0.10.24)")
     }
 
     @Synchronized

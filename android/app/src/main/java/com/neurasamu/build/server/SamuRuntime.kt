@@ -18,7 +18,6 @@ object SamuRuntime {
         private set
 
     @Volatile var settings: AppSettings = AppSettings()
-        private set
 
     fun httpOrNull(): SamuHttpServer? = http
 
