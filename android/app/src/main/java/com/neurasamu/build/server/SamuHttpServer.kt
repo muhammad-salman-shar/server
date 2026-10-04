@@ -8,10 +8,12 @@ import java.io.OutputStream
 
 class SamuHttpServer(
     private val ctx: Context,
-    port: Int = 8080
-) : NanoHTTPD("0.0.0.0", port) {
+    port: Int = 8080,
+    hostname: String = "0.0.0.0"
+) : NanoHTTPD(hostname, port) {
 
-    @Volatile var apiKey: String? = null
+    @Volatile var validKeys: Set<String> = emptySet()
+    @Volatile var onRequest: ((String?) -> Unit)? = null
     @Volatile var displayNameOverride: String? = null
 
     override fun serve(session: IHTTPSession): Response {
@@ -44,9 +46,12 @@ class SamuHttpServer(
     }
 
     private fun checkAuth(session: IHTTPSession): Boolean {
-        val key = apiKey?.takeIf { it.isNotBlank() } ?: return true
+        if (validKeys.isEmpty()) return true  // no keys = auth disabled
         val h = session.headers["authorization"] ?: return false
-        return h.removePrefix("Bearer ").trim() == key
+        val presented = h.removePrefix("Bearer ").trim()
+        val ok = validKeys.contains(presented)
+        if (ok) onRequest?.invoke(presented)
+        return ok
     }
 
     private fun chat(session: IHTTPSession): Response {
