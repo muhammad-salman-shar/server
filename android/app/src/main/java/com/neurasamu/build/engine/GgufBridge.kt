@@ -31,6 +31,8 @@ object GgufBridge {
     }
 
     fun stop() = SamuEngine.stop()
+    fun clearContext() = SamuEngine.clearContext()
+
 
     fun unload() {
         try { SamuEngine.unload() } finally { isLoaded = false }

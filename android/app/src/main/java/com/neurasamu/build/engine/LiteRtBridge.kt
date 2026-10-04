@@ -67,7 +67,8 @@ object LiteRtBridge {
         Log.i(TAG, "stop() called (no cancel API in 0.10.24)")
     }
 
-    @Synchronized
+    fun clearContext() { /* MediaPipe is stateless per call — no-op */ }
+
     fun unload() {
         try {
             inference?.close()

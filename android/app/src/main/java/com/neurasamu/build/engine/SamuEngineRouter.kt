@@ -68,6 +68,14 @@ object SamuEngineRouter {
             else -> {}
         }
     }
+    fun clearContext() {
+        when (active) {
+            Backend.GGUF -> GgufBridge.clearContext()
+            Backend.LITERT -> LiteRtBridge.clearContext()
+            else -> {}
+        }
+    }
+
 
     fun unload() {
         when (active) {
