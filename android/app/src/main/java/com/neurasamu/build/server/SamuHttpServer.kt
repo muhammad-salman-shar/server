@@ -96,6 +96,8 @@ class SamuHttpServer(
     }
 
     private fun fullChat(prompt: String, maxTokens: Int, temperature: Double, topP: Double): Response {
+        // Stateless per request — clear KV cache so this call is independent
+        try { SamuEngineRouter.clearContext() } catch (_: Exception) {}
         val sb = StringBuilder()
         SamuEngineRouter.generate(
             prompt = prompt,
@@ -175,6 +177,8 @@ class SamuHttpServer(
                         }))
                     }
                     sse(first)
+                    // Stateless per request — clear KV cache before this generation
+                    try { SamuEngineRouter.clearContext() } catch (_: Exception) {}
 
                     SamuEngineRouter.generate(
                         prompt = prompt,
