@@ -106,12 +106,23 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
                 Spacer(Modifier.height(12.dp))
                 Text("Models", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))
+                val grouped = state.models.groupBy { it.family }
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(state.models, key = { it.id }) { m ->
-                        ModelRow(m, state.active?.id == m.id, vm)
+                    grouped.forEach { (family, models) ->
+                        item(key = "h-" + family.name) {
+                            Text(
+                                family.label + " (" + models.size + ")",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                        items(models, key = { it.id }) { m ->
+                            ModelRow(m, state.active?.id == m.id, vm)
+                        }
                     }
                 }
                 state.message?.let {
