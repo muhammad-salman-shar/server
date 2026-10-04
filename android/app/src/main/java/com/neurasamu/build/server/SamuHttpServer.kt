@@ -224,16 +224,22 @@ class SamuHttpServer(
     }
 
     private fun buildChatPrompt(messages: JSONArray): String {
-        val sb = StringBuilder()
+        val pairs = mutableListOf<Pair<String, String>>()
         for (i in 0 until messages.length()) {
             val m = messages.getJSONObject(i)
             val role = m.optString("role", "user")
             val content = m.optString("content", "")
-            val r = when (role) { "assistant" -> "model"; "system" -> "user"; else -> role }
-            sb.append("<start_of_turn>").append(r).append("\n")
-            sb.append(content).append("<end_of_turn>\n")
+            pairs.add(role to content)
         }
-        sb.append("<start_of_turn>model\n")
+        val applied = applyChatTemplate(pairs)
+        if (applied.isNotBlank()) return applied
+        // Fallback: generic ChatML if model has no template
+        val sb = StringBuilder()
+        for ((role, content) in pairs) {
+            sb.append("<|im_start|>").append(role).append("\n")
+            sb.append(content).append("<|im_end|>\n")
+        }
+        sb.append("<|im_start|>assistant\n")
         return sb.toString()
     }
 

@@ -640,3 +640,60 @@ Java_com_neurasamu_build_server_SamuEngine_nativeSetSystemPromptLength(
     // Currently not used but available for future smart context management
     LOGI("System prompt length set to: %d tokens (currently unused)", length);
 }
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_neurasamu_build_server_SamuEngine_nativeApplyChatTemplate(
+    JNIEnv* env, jobject thiz,
+    jobjectArray roles, jobjectArray contents, jboolean add_assistant) {
+
+    if (!g_model) {
+        return env->NewStringUTF("");
+    }
+
+    jsize n = env->GetArrayLength(roles);
+    std::vector<std::string> role_strs, content_strs;
+    role_strs.reserve(n);
+    content_strs.reserve(n);
+
+    for (jsize i = 0; i < n; i++) {
+        jstring r = (jstring)env->GetObjectArrayElement(roles, i);
+        jstring c = (jstring)env->GetObjectArrayElement(contents, i);
+        const char* rs = env->GetStringUTFChars(r, nullptr);
+        const char* cs = env->GetStringUTFChars(c, nullptr);
+        role_strs.emplace_back(rs ? rs : "");
+        content_strs.emplace_back(cs ? cs : "");
+        env->ReleaseStringUTFChars(r, rs);
+        env->ReleaseStringUTFChars(c, cs);
+        env->DeleteLocalRef(r);
+        env->DeleteLocalRef(c);
+    }
+
+    std::vector<llama_chat_message> msgs;
+    msgs.reserve(n);
+    for (jsize i = 0; i < n; i++) {
+        msgs.push_back({ role_strs[i].c_str(), content_strs[i].c_str() });
+    }
+
+    const char* tmpl = llama_model_chat_template(g_model, nullptr);
+
+    std::vector<char> buf(8192);
+    int32_t len = llama_chat_apply_template(
+        tmpl, msgs.data(), msgs.size(),
+        add_assistant == JNI_TRUE, buf.data(), buf.size());
+
+    if (len > (int32_t)buf.size()) {
+        buf.resize(len + 512);
+        len = llama_chat_apply_template(
+            tmpl, msgs.data(), msgs.size(),
+            add_assistant == JNI_TRUE, buf.data(), buf.size());
+    }
+
+    if (len < 0) {
+        LOGE("llama_chat_apply_template failed: %d", len);
+        return env->NewStringUTF("");
+    }
+
+    std::string result(buf.data(), len);
+    LOGI("Applied chat template, prompt len=%d", (int)result.size());
+    return env->NewStringUTF(result.c_str());
+}

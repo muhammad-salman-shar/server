@@ -47,6 +47,7 @@ object SamuEngine {
     external fun nativeGetContextSize(): Int
     external fun nativeClearContext()
     external fun nativeSetSystemPromptLength(length: Int)
+    external fun nativeApplyChatTemplate(roles: Array<String>, contents: Array<String>, addAssistant: Boolean): String
 
     @Volatile var isLoaded: Boolean = false
         private set
@@ -122,5 +123,18 @@ object SamuEngine {
         return try { nativeDetectGpu(stats) } catch (e: Throwable) {
             Log.w(TAG, "GPU detect failed: ${e.message}"); "cpu-only"
         }
+    }
+}
+
+// Top-level helper in same file
+fun applyChatTemplate(messages: List<Pair<String, String>>): String {
+    if (messages.isEmpty()) return ""
+    val roles = messages.map { it.first }.toTypedArray()
+    val contents = messages.map { it.second }.toTypedArray()
+    return try {
+        SamuEngine.nativeApplyChatTemplate(roles, contents, true)
+    } catch (e: Throwable) {
+        android.util.Log.w("SamuEngine", "applyChatTemplate failed: ${e.message}")
+        ""
     }
 }
