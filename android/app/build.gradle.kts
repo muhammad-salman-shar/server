@@ -75,5 +75,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+    implementation("com.google.mediapipe:tasks-genai:0.10.24")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

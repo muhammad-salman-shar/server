@@ -9,6 +9,7 @@ import com.neurasamu.build.data.ApiKeyStore
 import com.neurasamu.build.data.AppSettings
 import com.neurasamu.build.model.ModelStore
 import com.neurasamu.build.model.SamuModel
+import com.neurasamu.build.engine.SamuEngineRouter
 import com.neurasamu.build.server.SamuEngine
 import com.neurasamu.build.server.SamuRuntime
 import com.neurasamu.build.server.SamuServerService
@@ -195,17 +196,26 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
             _state.value = _state.value.copy(busy = true, busyLabel = "Self-test…")
             val out = withContext(Dispatchers.IO) {
                 buildString {
-                    appendLine("=== SamuEngine self-test ===")
-                    appendLine("Lib loaded: ${SamuEngine.isLoaded}")
-                    appendLine("GPU: ${runCatching { SamuEngine.detectGpu() }.getOrElse { "err: ${it.message}" }}")
-                    appendLine("Context: ${runCatching { SamuEngine.contextSize() }.getOrElse { -1 }}")
+                    appendLine("=== SaMu Lab engines ===")
+                    appendLine("Active: ${SamuEngineRouter.active ?: \"none\"}")
+                    appendLine("Loaded: ${SamuEngineRouter.isLoaded()}")
+                    appendLine("Context: ${SamuEngineRouter.contextSize()}")
+                    appendLine("")
+                    appendLine("=== llama.cpp (GGUF) ===")
+                    appendLine("JNI lib: ${SamuEngine.isLoaded}")
+                    appendLine("GPU: ${runCatching { SamuEngine.detectGpu() }.getOrElse { \"err: ${it.message}\" }}")
+                    appendLine("")
+                    appendLine("=== Device ===")
                     appendLine("Cores: ${Runtime.getRuntime().availableProcessors()}")
+                    val topo = com.neurasamu.build.server.CpuTopology.detect()
+                    appendLine("Big cores: ${topo.bigCores}")
+                    appendLine("Decode threads: ${topo.decodeThreads}")
+                    appendLine("Prefill threads: ${topo.prefillThreads}")
                 }
             }
             _state.value = _state.value.copy(busy = false, busyLabel = "", selfTestResult = out)
         }
     }
-
     fun updateModelName(name: String) {
         _state.value = _state.value.copy(modelName = name)
         SamuRuntime.httpOrNull()?.displayNameOverride = name

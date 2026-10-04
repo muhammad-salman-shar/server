@@ -1,6 +1,7 @@
 package com.neurasamu.build.server
 
 import android.content.Context
+import com.neurasamu.build.engine.SamuEngineRouter
 import fi.iki.elonen.NanoHTTPD
 import org.json.JSONArray
 import org.json.JSONObject
@@ -55,7 +56,7 @@ class SamuHttpServer(
     }
 
     private fun chat(session: IHTTPSession): Response {
-        if (!SamuEngine.isLoaded) return err(Response.Status.SERVICE_UNAVAILABLE, "no model loaded")
+        if (!SamuEngineRouter.isLoaded()) return err(Response.Status.SERVICE_UNAVAILABLE, "no model loaded")
         if (!checkAuth(session)) return err(Response.Status.UNAUTHORIZED, "unauthorized")
 
         val files = HashMap<String, String>()
@@ -76,7 +77,7 @@ class SamuHttpServer(
     }
 
     private fun completions(session: IHTTPSession): Response {
-        if (!SamuEngine.isLoaded) return err(Response.Status.SERVICE_UNAVAILABLE, "no model loaded")
+        if (!SamuEngineRouter.isLoaded()) return err(Response.Status.SERVICE_UNAVAILABLE, "no model loaded")
         if (!checkAuth(session)) return err(Response.Status.UNAUTHORIZED, "unauthorized")
 
         val files = HashMap<String, String>()
@@ -96,7 +97,7 @@ class SamuHttpServer(
 
     private fun fullChat(prompt: String, maxTokens: Int, temperature: Double, topP: Double): Response {
         val sb = StringBuilder()
-        SamuEngine.generate(
+        SamuEngineRouter.generate(
             prompt = prompt,
             maxTokens = maxTokens,
             temperature = temperature,
@@ -120,7 +121,7 @@ class SamuHttpServer(
             put("usage", JSONObject().apply {
                 put("prompt_tokens", 0)
                 put("completion_tokens", 0)
-                put("total_tokens", SamuEngine.tokensUsed())
+                put("total_tokens", SamuEngineRouter.tokensUsed())
             })
         }.toString()
         return json(Response.Status.OK, body)
@@ -175,7 +176,7 @@ class SamuHttpServer(
                     }
                     sse(first)
 
-                    SamuEngine.generate(
+                    SamuEngineRouter.generate(
                         prompt = prompt,
                         maxTokens = maxTokens,
                         temperature = temperature,

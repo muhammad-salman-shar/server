@@ -3,6 +3,7 @@ package com.neurasamu.build.server
 import android.content.Context
 import com.neurasamu.build.data.ApiKeyStore
 import com.neurasamu.build.data.AppSettings
+import com.neurasamu.build.engine.SamuEngineRouter
 import com.neurasamu.build.model.SamuModel
 import java.io.File
 
@@ -25,18 +26,14 @@ object SamuRuntime {
         settings = AppSettings.load(ctx)
         port = settings.port
         hostname = if (settings.lanEnabled) "0.0.0.0" else "127.0.0.1"
-
         val keys = ApiKeyStore.load(ctx)
             .filter { it.enabled && it.key.isNotBlank() }
-            .map { it.key }
-            .toSet()
+            .map { it.key }.toSet()
         http?.validKeys = keys
-        android.util.Log.i("SamuRuntime", "Settings: port=$port hostname=$hostname keys=${keys.size}")
     }
 
     fun http(ctx: Context): SamuHttpServer {
         http?.let {
-            // refresh keys in case they changed
             val keys = ApiKeyStore.load(ctx)
                 .filter { k -> k.enabled && k.key.isNotBlank() }
                 .map { k -> k.key }.toSet()
@@ -62,21 +59,22 @@ object SamuRuntime {
         val topology = CpuTopology.detect()
         android.util.Log.i(
             "SamuRuntime",
-            "CPU: total=${topology.total} big=${topology.bigCores} " +
+            "Loading ${model.displayName} format=${model.format} family=${model.family} " +
                 "decode=${topology.decodeThreads} prefill=${topology.prefillThreads}"
         )
-        SamuEngine.loadModel(
-            path = model.file.absolutePath,
+        SamuEngineRouter.load(
+            ctx = ctx,
+            modelFile = model.file,
             threads = topology.decodeThreads,
             threadsBatch = topology.prefillThreads,
-            ctx = model.ctx,
-            gpuLayers = 0
+            ctxSize = model.ctx,
+            onToken = {}
         )
         activeModel = model
     }
 
     fun unloadModel() {
-        try { SamuEngine.unload() } catch (_: Exception) {}
+        try { SamuEngineRouter.unload() } catch (_: Exception) {}
         activeModel = null
     }
 
@@ -90,7 +88,7 @@ object SamuRuntime {
 
     fun stopAll() {
         try { http?.stop() } catch (_: Exception) {}
-        try { SamuEngine.unload() } catch (_: Exception) {}
+        try { SamuEngineRouter.unload() } catch (_: Exception) {}
         http = null
         activeModel = null
     }
