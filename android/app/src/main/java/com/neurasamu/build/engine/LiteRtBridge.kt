@@ -2,7 +2,7 @@ package com.neurasamu.build.engine
 
 import android.content.Context
 import android.util.Log
-import com.google.mediapipe.tasks.components.containers.ProgressListener
+import com.google.mediapipe.tasks.genai.llminference.ProgressListener
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
 import java.io.File
