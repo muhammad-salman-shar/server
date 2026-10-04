@@ -190,8 +190,11 @@ private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context) {
             if (s.serverRunning) {
                 Spacer(Modifier.height(8.dp))
                 CopyRow("URL", s.url, ctx)
-            }
+                Spacer(Modifier.height(4.dp))
+                val activeKey = s.apiKeys.firstOrNull { it.enabled }?.key
+                CopyRow("Key", activeKey ?: "(auth OFF — no keys)", ctx)
             Spacer(Modifier.height(12.dp))
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { if (s.serverRunning) vm.stopServer() else vm.startServer() },
