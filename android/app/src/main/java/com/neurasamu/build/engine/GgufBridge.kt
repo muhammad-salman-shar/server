@@ -29,6 +29,7 @@ object GgufBridge {
             onToken = onToken
         )
 
+    }
     fun generateWithImage(
         prompt: String,
         rgbData: ByteArray,
