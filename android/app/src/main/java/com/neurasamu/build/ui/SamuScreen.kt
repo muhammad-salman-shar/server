@@ -294,9 +294,24 @@ private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel) {
         Row(Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(m.displayName, fontWeight = FontWeight.SemiBold)
-                Text("%.1f MB".format(m.sizeBytes / 1_048_576.0),
-                    style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(m.displayName, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(6.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            "${m.type.emoji} ${m.type.label}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text("${m.family.label} · ${m.format.label} · %.1f MB".format(m.sizeBytes / 1_048_576.0),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 if (active) Text("ACTIVE", color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelSmall)
             }

@@ -40,6 +40,7 @@ data class SamuModel(
     val sizeBytes: Long,
     val format: ModelFormat = ModelFormat.fromFileName(file.name),
     val family: ModelFamily = ModelFamily.fromName(file.nameWithoutExtension),
+    val type: SamuModelType = ModelInspector.detect(file),
     val ctx: Int = 2048,
     val threads: Int = 4
 ) {
