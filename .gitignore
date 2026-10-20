@@ -25,3 +25,6 @@ android/app/src/main/jniLibs/
 bin/
 config.yaml
 samu.log
+
+# llama.cpp backup (temporary)
+android/app/src/main/cpp/llama.cpp.bak/

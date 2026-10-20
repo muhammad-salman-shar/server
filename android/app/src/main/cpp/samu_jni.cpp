@@ -249,8 +249,7 @@ Java_com_neurasamu_build_server_SamuEngine_nativeLoadModel(
     // Model parameters
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = n_gpu_layers;
-    model_params.use_mlock = true;
-    model_params.use_mmap = true;
+    model_params.load_mode = LLAMA_LOAD_MODE_MMAP_MLOCK;
 
     llama_log_set(androidLlamaLog, nullptr);
     {
