@@ -102,7 +102,7 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
             Column(
                 Modifier.fillMaxSize().padding(pad).padding(horizontal = 16.dp)
             ) {
-                ServerCard(state, vm, ctx)
+                ServerCard(state, vm, ctx, onManageKeys = { showApiKeys = true })
                 Spacer(Modifier.height(12.dp))
                 Text("Models", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))
@@ -167,7 +167,7 @@ private fun DrawerItem(label: String, icon: androidx.compose.ui.graphics.vector.
 }
 
 @Composable
-private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context) {
+private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context, onManageKeys: () -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -203,7 +203,28 @@ private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context) {
                 CopyRow("URL", s.url, ctx)
                 Spacer(Modifier.height(4.dp))
                 val activeKey = s.apiKeys.firstOrNull { it.enabled }?.key
-                CopyRow("Key", activeKey ?: "(auth OFF — no keys)", ctx)
+                if (activeKey != null) {
+                    CopyRow("Key", activeKey, ctx)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${s.apiKeys.size} key(s) active",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onManageKeys) { Text("Manage keys") }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("No keys — auth OFF",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onManageKeys) {
+                            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add API key")
+                        }
+                    }
+                }
             Spacer(Modifier.height(12.dp))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -415,6 +436,12 @@ private fun ApiKeysDialog(keys: List<ApiKey>, onAdd: (String) -> Unit,
                                 Text(k.label, fontWeight = FontWeight.SemiBold)
                                 Text(k.key, fontFamily = FontFamily.Monospace,
                                     fontSize = 10.sp, maxLines = 1)
+                            }
+                            IconButton(onClick = {
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("api_key", k.key))
+                            }) {
+                                Icon(Icons.Default.ContentCopy, "copy", Modifier.size(18.dp))
                             }
                             Switch(checked = k.enabled, onCheckedChange = { onToggle(k.id) })
                             IconButton(onClick = { onDelete(k.id) }) {
