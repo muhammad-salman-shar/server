@@ -462,6 +462,7 @@ Java_com_neurasamu_build_server_SamuEngine_nativeGenerate(
     // Add penalties first (applied to logits before sampling)
     if (repeat_penalty != 1.0f || frequency_penalty != 0.0f || presence_penalty != 0.0f) {
         llama_sampler_chain_add(g_sampler, llama_sampler_init_penalties(
+            g_vocab ? (int32_t)llama_vocab_n_tokens(g_vocab) : 0,  // n_vocab
             repeat_last_n,              // penalty_last_n
             repeat_penalty,             // penalty_repeat
             frequency_penalty,          // penalty_freq

@@ -30,13 +30,16 @@ set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_MTMD ON CACHE BOOL "Multimodal (vision/audio) support" FORCE)
+set(MTMD_VIDEO OFF CACHE BOOL "Video support requires ffmpeg" FORCE)
 
 # llama.cpp submodule lives next to this file
 add_subdirectory(llama.cpp)
 
 # All llama targets need c++_shared on Android (NDK)
 if(ANDROID)
-    foreach(target ggml-base ggml ggml-cpu llama)
+    foreach(target ggml-base ggml ggml-cpu llama mtmd)
         if(TARGET ${target})
             target_link_libraries(${target} PRIVATE c++_shared)
         endif()
@@ -47,6 +50,7 @@ add_library(samu_jni SHARED samu_jni.cpp)
 
 target_link_libraries(samu_jni
     llama
+    mtmd
     c++_shared
     android
     log
@@ -55,4 +59,5 @@ target_link_libraries(samu_jni
 target_include_directories(samu_jni PRIVATE
     llama.cpp/include
     llama.cpp/ggml/include
+    llama.cpp/tools/mtmd
 )
