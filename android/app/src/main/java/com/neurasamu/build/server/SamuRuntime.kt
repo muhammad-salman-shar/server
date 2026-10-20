@@ -72,6 +72,22 @@ object SamuRuntime {
             ctxSize = model.ctx,
             onToken = {}
         )
+        // Auto-detect and load mmproj (vision projector) from same folder
+        try {
+            val parent = model.file.parentFile
+            val mmproj = parent?.listFiles { f ->
+                f.isFile && f.name.startsWith("mmproj", ignoreCase = true) &&
+                    f.name.endsWith(".gguf", ignoreCase = true)
+            }?.firstOrNull()
+            if (mmproj != null) {
+                val ok = SamuEngine.loadMmproj(mmproj.absolutePath)
+                android.util.Log.i("SamuRuntime", "mmproj loaded=$ok from ${mmproj.name}")
+            } else {
+                android.util.Log.i("SamuRuntime", "No mmproj found — text-only mode")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("SamuRuntime", "mmproj auto-load failed: ${e.message}")
+        }
         activeModel = model
     }
 

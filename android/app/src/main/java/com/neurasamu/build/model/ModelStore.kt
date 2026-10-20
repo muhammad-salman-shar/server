@@ -22,6 +22,7 @@ object ModelStore {
         val d = modelsDir(ctx)
         return d.listFiles { f ->
             f.isFile && ACCEPTED_EXT.any { f.name.endsWith(it, ignoreCase = true) }
+                && !f.name.startsWith("mmproj", ignoreCase = true)
         }?.map { f ->
             SamuModel(
                 id = f.nameWithoutExtension,
