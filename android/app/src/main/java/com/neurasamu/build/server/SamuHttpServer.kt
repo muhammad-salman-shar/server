@@ -58,6 +58,161 @@ class SamuHttpServer(
     }
 
 
+    private data class AudioInput(
+        val promptWithMarker: String,
+        val samples: FloatArray,
+        val sampleRate: Int
+    )
+
+    private fun extractAudioInput(messages: JSONArray): AudioInput? {
+        val sb = StringBuilder()
+        var samples: FloatArray? = null
+        var rate = 16000
+        val marker = "<__media__>"
+
+        for (i in 0 until messages.length()) {
+            val m = messages.getJSONObject(i)
+            val role = m.optString("role", "user")
+            val contentNode = m.opt("content")
+            val textBuf = StringBuilder()
+
+            if (contentNode is String) {
+                textBuf.append(contentNode)
+            } else if (contentNode is JSONArray) {
+                for (j in 0 until contentNode.length()) {
+                    val part = contentNode.getJSONObject(j)
+                    when (part.optString("type", "")) {
+                        "text" -> textBuf.append(part.optString("text", ""))
+                        "input_audio" -> {
+                            val audioObj = try { part.getJSONObject("input_audio") } catch (_: Exception) { null }
+                            val b64 = audioObj?.optString("data", "") ?: ""
+                            if (b64.isNotEmpty()) {
+                                try {
+                                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    val dec = decodeWav(bytes)
+                                    if (dec != null) {
+                                        samples = dec.first
+                                        rate = dec.second
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        "audio_url" -> {
+                            val urlObj = try { part.getJSONObject("audio_url") } catch (_: Exception) { null }
+                            val url = urlObj?.optString("url", "") ?: ""
+                            val b64 = if (url.startsWith("data:")) url.substringAfter(",", "") else url
+                            if (b64.isNotEmpty()) {
+                                try {
+                                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    val dec = decodeWav(bytes)
+                                    if (dec != null) {
+                                        samples = dec.first
+                                        rate = dec.second
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                }
+            }
+
+            sb.append("<start_of_turn>").append(role).append("\n")
+            sb.append(textBuf).append("<end_of_turn>\n")
+        }
+        sb.append("<start_of_turn>model\n")
+
+        return if (samples != null) AudioInput("$marker\n$sb", samples!!, rate) else null
+    }
+
+    private fun decodeWav(bytes: ByteArray): Pair<FloatArray, Int>? {
+        if (bytes.size < 44) return null
+        val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        if (String(bytes, 0, 4) != "RIFF" || String(bytes, 8, 4) != "WAVE") return null
+
+        var pos = 12
+        var sampleRate = 16000
+        var channels = 1
+        var bitsPerSample = 16
+        var dataOffset = -1
+        var dataSize = 0
+
+        while (pos + 8 <= bytes.size) {
+            val chunkId = String(bytes, pos, 4)
+            val chunkSize = bb.getInt(pos + 4)
+            if (chunkId == "fmt ") {
+                channels = bb.getShort(pos + 10).toInt()
+                sampleRate = bb.getInt(pos + 12)
+                bitsPerSample = bb.getShort(pos + 22).toInt()
+            } else if (chunkId == "data") {
+                dataOffset = pos + 8
+                dataSize = chunkSize
+                break
+            }
+            pos += 8 + chunkSize + (chunkSize and 1)
+        }
+
+        if (dataOffset < 0 || dataSize <= 0) return null
+        val end = (dataOffset + dataSize).coerceAtMost(bytes.size)
+        val totalSamples = (end - dataOffset) / (bitsPerSample / 8)
+        val floatSamples = FloatArray(totalSamples)
+
+        for (k in 0 until totalSamples) {
+            val off = dataOffset + k * (bitsPerSample / 8)
+            floatSamples[k] = when (bitsPerSample) {
+                16 -> bb.getShort(off) / 32768f
+                8 -> ((bytes[off].toInt() and 0xFF) - 128) / 128f
+                32 -> bb.getFloat(off)
+                else -> 0f
+            }
+        }
+
+        if (channels > 1) {
+            val mono = FloatArray(floatSamples.size / channels)
+            for (k in mono.indices) {
+                var sum = 0f
+                for (c in 0 until channels) sum += floatSamples[k * channels + c]
+                mono[k] = sum / channels
+            }
+            return mono to sampleRate
+        }
+        return floatSamples to sampleRate
+    }
+
+    private fun fullChatAudio(a: AudioInput, maxTokens: Int, temperature: Double, topP: Double): Response {
+        try { SamuEngineRouter.clearContext() } catch (_: Exception) {}
+        val sb = StringBuilder()
+        SamuEngineRouter.generateWithAudio(
+            prompt = a.promptWithMarker,
+            audioSamples = a.samples,
+            sampleRate = a.sampleRate,
+            maxTokens = maxTokens,
+            temperature = temperature,
+            topP = topP,
+            onToken = { sb.append(it) }
+        )
+        val text = sb.toString()
+        val body = JSONObject().apply {
+            put("id", "chatcmpl-samu-${System.currentTimeMillis()}")
+            put("object", "chat.completion")
+            put("created", System.currentTimeMillis() / 1000)
+            put("model", activeName())
+            put("choices", JSONArray().put(JSONObject().apply {
+                put("index", 0)
+                put("message", JSONObject().apply {
+                    put("role", "assistant")
+                    put("content", text)
+                })
+                put("finish_reason", "stop")
+            }))
+            put("usage", JSONObject().apply {
+                put("prompt_tokens", 0)
+                put("completion_tokens", 0)
+                put("total_tokens", SamuEngineRouter.tokensUsed())
+            })
+        }.toString()
+        return json(Response.Status.OK, body)
+    }
+
     private data class VisionInput(
         val promptWithMarker: String,
         val rgb: ByteArray,
@@ -179,6 +334,14 @@ class SamuHttpServer(
                 return err(Response.Status.BAD_REQUEST, "vision model but no mmproj loaded — add mmproj-*.gguf to model folder")
             }
             return fullChatVision(visionInput, node.optInt("max_tokens", 512).coerceIn(1, 4096),
+                node.optDouble("temperature", 0.7), node.optDouble("top_p", 0.9))
+        }
+        val audioInput = extractAudioInput(messages)
+        if (audioInput != null) {
+            if (!SamuEngine.isMmprojLoaded()) {
+                return err(Response.Status.BAD_REQUEST, "audio model but no mmproj loaded — add mmproj-*.gguf to model folder")
+            }
+            return fullChatAudio(audioInput, node.optInt("max_tokens", 512).coerceIn(1, 4096),
                 node.optDouble("temperature", 0.7), node.optDouble("top_p", 0.9))
         }
         val prompt = buildChatPrompt(messages)

@@ -79,6 +79,24 @@ object SamuEngineRouter {
         }
     }
 
+    fun generateWithAudio(
+        prompt: String,
+        audioSamples: FloatArray,
+        sampleRate: Int,
+        maxTokens: Int,
+        temperature: Double,
+        topP: Double,
+        onToken: (String) -> Unit
+    ) {
+        when (active) {
+            Backend.GGUF -> GgufBridge.generateWithAudio(
+                prompt, audioSamples, sampleRate, maxTokens, temperature, topP, onToken
+            )
+            else -> throw IllegalStateException("Audio not supported on this backend")
+        }
+    }
+
+
 
     fun stop() {
         when (active) {

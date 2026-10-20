@@ -913,3 +913,143 @@ Java_com_neurasamu_build_server_SamuEngine_nativeGenerateMultimodal(
 
     LOGI("Multimodal generation complete: %d tokens", generated);
 }
+
+// ============ AUDIO INPUT SUPPORT ============
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neurasamu_build_server_SamuEngine_nativeGenerateWithAudio(
+    JNIEnv* env, jobject thiz,
+    jstring prompt_with_marker,
+    jfloatArray audio_samples, jint sample_rate,
+    jlong max_tokens,
+    jdouble temperature, jdouble top_p, jlong top_k,
+    jdouble repeat_penalty, jdouble frequency_penalty, jdouble presence_penalty,
+    jlong repeat_last_n, jlong seed,
+    jobject token_callback) {
+
+    if (!g_mtmd) {
+        jclass ex = env->FindClass("java/lang/IllegalStateException");
+        env->ThrowNew(ex, "mmproj not loaded (required for audio)");
+        return;
+    }
+    if (!g_ctx || !g_model || !g_vocab) {
+        jclass ex = env->FindClass("java/lang/IllegalStateException");
+        env->ThrowNew(ex, "Model/context not loaded");
+        return;
+    }
+
+    if (g_token_callback != nullptr) {
+        env->DeleteGlobalRef(g_token_callback);
+        g_token_callback = nullptr;
+    }
+    g_token_callback = env->NewGlobalRef(token_callback);
+    g_stop_flag = false;
+
+    llama_memory_t mem = llama_get_memory(g_ctx);
+    if (mem) llama_memory_seq_rm(mem, 0, 0, -1);
+    g_n_past = 0;
+
+    // Get audio samples
+    jsize n_samples = env->GetArrayLength(audio_samples);
+    if (n_samples <= 0) {
+        jclass ex = env->FindClass("java/lang/IllegalArgumentException");
+        env->ThrowNew(ex, "Empty audio buffer");
+        return;
+    }
+    jfloat* samples = env->GetFloatArrayElements(audio_samples, nullptr);
+    mtmd_bitmap* bitmap = mtmd_bitmap_init_from_audio((size_t)n_samples, (const float*)samples);
+    env->ReleaseFloatArrayElements(audio_samples, samples, JNI_ABORT);
+
+    if (!bitmap) {
+        jclass ex = env->FindClass("java/lang/RuntimeException");
+        env->ThrowNew(ex, "mtmd_bitmap_init_from_audio failed");
+        return;
+    }
+
+    // Build text input
+    const char* prompt = env->GetStringUTFChars(prompt_with_marker, nullptr);
+    mtmd_input_text text_in;
+    text_in.text = prompt;
+    text_in.text_len = strlen(prompt);
+    text_in.add_special = true;
+    text_in.parse_special = true;
+
+    mtmd_input_chunks* chunks = mtmd_input_chunks_init();
+    const mtmd_bitmap* bitmaps[1] = { bitmap };
+    int32_t tok_res = mtmd_tokenize(g_mtmd, chunks, &text_in, bitmaps, 1);
+    env->ReleaseStringUTFChars(prompt_with_marker, prompt);
+
+    if (tok_res != 0) {
+        mtmd_bitmap_free(bitmap);
+        mtmd_input_chunks_free(chunks);
+        jclass ex = env->FindClass("java/lang/RuntimeException");
+        env->ThrowNew(ex, "mtmd_tokenize (audio) failed");
+        return;
+    }
+
+    llama_pos new_n_past = 0;
+    int32_t eval_res = mtmd_helper_eval_chunks(
+        g_mtmd, g_ctx, chunks, 0, 0, 512, true, &new_n_past);
+    mtmd_bitmap_free(bitmap);
+    mtmd_input_chunks_free(chunks);
+
+    if (eval_res != 0) {
+        jclass ex = env->FindClass("java/lang/RuntimeException");
+        env->ThrowNew(ex, "mtmd eval (audio) failed");
+        return;
+    }
+
+    g_n_past = new_n_past;
+    LOGI("Audio eval done, n_past=%d, generating", (int)g_n_past);
+
+    // Sampler setup
+    llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
+    if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
+    g_sampler = llama_sampler_chain_init(sparams);
+
+    if (repeat_penalty != 1.0f || frequency_penalty != 0.0f || presence_penalty != 0.0f) {
+        llama_sampler_chain_add(g_sampler, llama_sampler_init_penalties(
+            (int32_t)llama_vocab_n_tokens(g_vocab),
+            repeat_last_n, repeat_penalty, frequency_penalty, presence_penalty));
+    }
+    llama_sampler_chain_add(g_sampler, llama_sampler_init_temp(temperature));
+    if (top_p > 0.0f && top_p < 1.0f)
+        llama_sampler_chain_add(g_sampler, llama_sampler_init_top_p(top_p, 1));
+    if (top_k > 0)
+        llama_sampler_chain_add(g_sampler, llama_sampler_init_top_k(top_k));
+    llama_sampler_chain_add(g_sampler, llama_sampler_init_dist(
+        (uint32_t)(seed > 0 ? seed : 42)));
+
+    // Generation
+    int generated = 0;
+    const int n_ctx = llama_n_ctx(g_ctx);
+    jclass callbackClass = env->GetObjectClass(g_token_callback);
+    jmethodID invokeMethod = env->GetMethodID(callbackClass, "invoke", "(Ljava/lang/Object;)Ljava/lang/Object;");
+
+    while (generated < max_tokens && !g_stop_flag) {
+        llama_token new_token = llama_sampler_sample(g_sampler, g_ctx, -1);
+        if (llama_vocab_is_eog(g_vocab, new_token)) break;
+        char buf[256];
+        int n = llama_token_to_piece(g_vocab, new_token, buf, sizeof(buf), 0, true);
+        if (n > 0) {
+            std::string piece(buf, n);
+            jstring jpiece = env->NewStringUTF(piece.c_str());
+            env->CallObjectMethod(g_token_callback, invokeMethod, jpiece);
+            env->DeleteLocalRef(jpiece);
+        }
+        llama_batch batch = llama_batch_get_one(&new_token, 1);
+        if (llama_decode(g_ctx, batch) != 0) break;
+        g_n_past++;
+        generated++;
+        llama_sampler_accept(g_sampler, new_token);
+        if (g_n_past >= n_ctx - 4) break;
+    }
+
+    if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
+    if (g_token_callback) {
+        env->DeleteGlobalRef(g_token_callback);
+        g_token_callback = nullptr;
+    }
+    env->DeleteLocalRef(callbackClass);
+    LOGI("Audio generation complete: %d tokens", generated);
+}

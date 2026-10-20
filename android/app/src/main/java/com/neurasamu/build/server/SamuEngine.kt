@@ -50,6 +50,22 @@ object SamuEngine {
     external fun nativeLoadMmproj(mmprojPath: String): Boolean
     external fun nativeIsMmprojLoaded(): Boolean
     external fun nativeFreeMmproj()
+    external fun nativeGenerateWithAudio(
+        promptWithMarker: String,
+        audioSamples: FloatArray,
+        sampleRate: Int,
+        maxTokens: Long,
+        temperature: Double,
+        topP: Double,
+        topK: Long,
+        repeatPenalty: Double,
+        frequencyPenalty: Double,
+        presencePenalty: Double,
+        repeatLastN: Long,
+        seed: Long,
+        tokenCallback: ((Any) -> Any)?
+    )
+
     external fun nativeGenerateMultimodal(
         promptWithMarker: String,
         rgbData: ByteArray,
@@ -159,6 +175,29 @@ object SamuEngine {
         }
         nativeGenerateMultimodal(
             prompt, rgbData, width, height,
+            maxTokens.toLong(), temperature, topP, 40L,
+            1.1, 0.0, 0.0, 64L, -1L, cb
+        )
+    }
+
+
+    fun generateWithAudio(
+        prompt: String,
+        audioSamples: FloatArray,
+        sampleRate: Int = 16000,
+        maxTokens: Int = 512,
+        temperature: Double = 0.7,
+        topP: Double = 0.9,
+        onToken: (String) -> Unit
+    ) {
+        if (!isLoaded) throw IllegalStateException("Model not loaded")
+        val cb: (Any) -> Any = { arg ->
+            val s = arg as? String ?: ""
+            onToken(s)
+            Unit
+        }
+        nativeGenerateWithAudio(
+            prompt, audioSamples, sampleRate,
             maxTokens.toLong(), temperature, topP, 40L,
             1.1, 0.0, 0.0, 64L, -1L, cb
         )

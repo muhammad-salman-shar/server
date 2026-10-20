@@ -51,6 +51,26 @@ object GgufBridge {
         )
     }
 
+    fun generateWithAudio(
+        prompt: String,
+        audioSamples: FloatArray,
+        sampleRate: Int,
+        maxTokens: Int,
+        temperature: Double,
+        topP: Double,
+        onToken: (String) -> Unit
+    ) {
+        SamuEngine.generateWithAudio(
+            prompt = prompt,
+            audioSamples = audioSamples,
+            sampleRate = sampleRate,
+            maxTokens = maxTokens,
+            temperature = temperature,
+            topP = topP,
+            onToken = onToken
+        )
+    }
+
 
     fun stop() = SamuEngine.stop()
     fun clearContext() = SamuEngine.clearContext()
