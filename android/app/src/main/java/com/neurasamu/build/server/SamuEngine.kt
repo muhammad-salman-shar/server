@@ -47,6 +47,25 @@ object SamuEngine {
     external fun nativeGetContextSize(): Int
     external fun nativeClearContext()
     external fun nativeSetSystemPromptLength(length: Int)
+    external fun nativeLoadMmproj(mmprojPath: String): Boolean
+    external fun nativeIsMmprojLoaded(): Boolean
+    external fun nativeFreeMmproj()
+    external fun nativeGenerateMultimodal(
+        promptWithMarker: String,
+        rgbData: ByteArray,
+        width: Int,
+        height: Int,
+        maxTokens: Long,
+        temperature: Double,
+        topP: Double,
+        topK: Long,
+        repeatPenalty: Double,
+        frequencyPenalty: Double,
+        presencePenalty: Double,
+        repeatLastN: Long,
+        seed: Long,
+        tokenCallback: ((Any) -> Any)?
+    )
     external fun nativeApplyChatTemplate(roles: Array<String>, contents: Array<String>, addAssistant: Boolean): String
 
     @Volatile var isLoaded: Boolean = false
@@ -117,6 +136,34 @@ object SamuEngine {
             cb
         )
     }
+
+    fun loadMmproj(path: String): Boolean = nativeLoadMmproj(path)
+    fun isMmprojLoaded(): Boolean = nativeIsMmprojLoaded()
+    fun freeMmproj() = nativeFreeMmproj()
+
+    fun generateWithImage(
+        prompt: String,
+        rgbData: ByteArray,
+        width: Int,
+        height: Int,
+        maxTokens: Int = 512,
+        temperature: Double = 0.7,
+        topP: Double = 0.9,
+        onToken: (String) -> Unit
+    ) {
+        if (!isLoaded) throw IllegalStateException("Model not loaded")
+        val cb: (Any) -> Any = { arg ->
+            val s = arg as? String ?: ""
+            onToken(s)
+            Unit
+        }
+        nativeGenerateMultimodal(
+            prompt, rgbData, width, height,
+            maxTokens.toLong(), temperature, topP, 40L,
+            1.1, 0.0, 0.0, 64L, -1L, cb
+        )
+    }
+
 
     fun detectGpu(): String {
         val stats = LongArray(8)
