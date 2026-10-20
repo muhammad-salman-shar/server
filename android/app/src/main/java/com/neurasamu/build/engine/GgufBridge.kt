@@ -28,7 +28,29 @@ object GgufBridge {
             topP = topP,
             onToken = onToken
         )
+
+    fun generateWithImage(
+        prompt: String,
+        rgbData: ByteArray,
+        width: Int,
+        height: Int,
+        maxTokens: Int,
+        temperature: Double,
+        topP: Double,
+        onToken: (String) -> Unit
+    ) {
+        SamuEngine.generateWithImage(
+            prompt = prompt,
+            rgbData = rgbData,
+            width = width,
+            height = height,
+            maxTokens = maxTokens,
+            temperature = temperature,
+            topP = topP,
+            onToken = onToken
+        )
     }
+
 
     fun stop() = SamuEngine.stop()
     fun clearContext() = SamuEngine.clearContext()

@@ -57,6 +57,110 @@ class SamuHttpServer(
         return ok
     }
 
+
+    private data class VisionInput(
+        val promptWithMarker: String,
+        val rgb: ByteArray,
+        val width: Int,
+        val height: Int
+    )
+
+    private fun extractVisionInput(messages: JSONArray): VisionInput? {
+        val sb = StringBuilder()
+        var rgb: ByteArray? = null
+        var w = 0
+        var h = 0
+        val marker = "<__media__>"
+
+        for (i in 0 until messages.length()) {
+            val m = messages.getJSONObject(i)
+            val role = m.optString("role", "user")
+            val contentNode = m.opt("content")
+            val textBuf = StringBuilder()
+
+            if (contentNode is String) {
+                textBuf.append(contentNode)
+            } else if (contentNode is JSONArray) {
+                for (j in 0 until contentNode.length()) {
+                    val part = contentNode.getJSONObject(j)
+                    when (part.optString("type", "")) {
+                        "text" -> textBuf.append(part.optString("text", ""))
+                        "image_url" -> {
+                            val url = try {
+                                part.getJSONObject("image_url").optString("url", "")
+                            } catch (_: Exception) { "" }
+                            val b64 = if (url.startsWith("data:")) url.substringAfter(",", "") else url
+                            if (b64.isNotEmpty()) {
+                                try {
+                                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                    if (bmp != null) {
+                                        w = bmp.width
+                                        h = bmp.height
+                                        val px = IntArray(w * h)
+                                        bmp.getPixels(px, 0, w, 0, 0, w, h)
+                                        val out = ByteArray(w * h * 3)
+                                        var k = 0
+                                        for (p in px) {
+                                            out[k++] = ((p shr 16) and 0xFF).toByte()
+                                            out[k++] = ((p shr 8) and 0xFF).toByte()
+                                            out[k++] = (p and 0xFF).toByte()
+                                        }
+                                        rgb = out
+                                        bmp.recycle()
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                }
+            }
+
+            sb.append("<start_of_turn>").append(role).append("\n")
+            sb.append(textBuf).append("<end_of_turn>\n")
+        }
+        sb.append("<start_of_turn>model\n")
+
+        return if (rgb != null) {
+            VisionInput("$marker\n$sb", rgb, w, h)
+        } else null
+    }
+
+    private fun fullChatVision(v: VisionInput, maxTokens: Int, temperature: Double, topP: Double): Response {
+        try { SamuEngineRouter.clearContext() } catch (_: Exception) {}
+        val sb = StringBuilder()
+        SamuEngineRouter.generateWithImage(
+            prompt = v.promptWithMarker,
+            rgbData = v.rgb,
+            width = v.width,
+            height = v.height,
+            maxTokens = maxTokens,
+            temperature = temperature,
+            topP = topP,
+            onToken = { sb.append(it) }
+        )
+        val text = sb.toString()
+        val body = JSONObject().apply {
+            put("id", "chatcmpl-samu-${System.currentTimeMillis()}")
+            put("object", "chat.completion")
+            put("created", System.currentTimeMillis() / 1000)
+            put("model", activeName())
+            put("choices", JSONArray().put(JSONObject().apply {
+                put("index", 0)
+                put("message", JSONObject().apply {
+                    put("role", "assistant")
+                    put("content", text)
+                })
+                put("finish_reason", "stop")
+            }))
+            put("usage", JSONObject().apply {
+                put("prompt_tokens", 0)
+                put("completion_tokens", 0)
+                put("total_tokens", SamuEngineRouter.tokensUsed())
+            })
+        }.toString()
+        return json(Response.Status.OK, body)
+    }
     private fun chat(session: IHTTPSession): Response {
         if (!SamuEngineRouter.isLoaded()) return err(Response.Status.SERVICE_UNAVAILABLE, "no model loaded")
         if (!checkAuth(session)) return err(Response.Status.UNAUTHORIZED, "unauthorized")
@@ -65,15 +169,24 @@ class SamuHttpServer(
         session.parseBody(files)
         val raw = files["postData"] ?: return err(Response.Status.BAD_REQUEST, "empty body")
         val node = JSONObject(raw)
-
         val messages = node.optJSONArray("messages")
             ?: return err(Response.Status.BAD_REQUEST, "messages[] required")
+
+        // Vision path — if message has image_url, use multimodal
+        val visionInput = extractVisionInput(messages)
+        if (visionInput != null) {
+            if (!SamuEngine.isMmprojLoaded()) {
+                return err(Response.Status.BAD_REQUEST, "vision model but no mmproj loaded — add mmproj-*.gguf to model folder")
+            }
+            return fullChatVision(visionInput, node.optInt("max_tokens", 512).coerceIn(1, 4096),
+                node.optDouble("temperature", 0.7), node.optDouble("top_p", 0.9))
+        }
         val prompt = buildChatPrompt(messages)
-        val maxTokens = node.optInt("max_tokens", 512).coerceIn(1, 4096)
         val temperature = node.optDouble("temperature", 0.7)
         val topP = node.optDouble("top_p", 0.9)
         val stream = node.optBoolean("stream", false)
 
+        val maxTokens = node.optInt("max_tokens", 512).coerceIn(1, 4096)
         return if (stream) streamChat(prompt, maxTokens, temperature, topP)
         else fullChat(prompt, maxTokens, temperature, topP)
     }
@@ -86,6 +199,8 @@ class SamuHttpServer(
         session.parseBody(files)
         val raw = files["postData"] ?: return err(Response.Status.BAD_REQUEST, "empty body")
         val node = JSONObject(raw)
+        val messages = node.optJSONArray("messages")
+            ?: return err(Response.Status.BAD_REQUEST, "messages[] required")
         val prompt = node.optString("prompt", "")
         if (prompt.isBlank()) return err(Response.Status.BAD_REQUEST, "prompt required")
         val maxTokens = node.optInt("max_tokens", 512).coerceIn(1, 4096)

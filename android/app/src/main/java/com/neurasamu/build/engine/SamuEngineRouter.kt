@@ -61,6 +61,25 @@ object SamuEngineRouter {
         }
     }
 
+    fun generateWithImage(
+        prompt: String,
+        rgbData: ByteArray,
+        width: Int,
+        height: Int,
+        maxTokens: Int,
+        temperature: Double,
+        topP: Double,
+        onToken: (String) -> Unit
+    ) {
+        when (active) {
+            Backend.GGUF -> GgufBridge.generateWithImage(
+                prompt, rgbData, width, height, maxTokens, temperature, topP, onToken
+            )
+            else -> throw IllegalStateException("Vision not supported on this backend")
+        }
+    }
+
+
     fun stop() {
         when (active) {
             Backend.GGUF -> GgufBridge.stop()
