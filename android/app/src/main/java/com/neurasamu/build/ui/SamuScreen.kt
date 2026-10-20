@@ -340,6 +340,9 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
     var topP by remember { mutableStateOf(s.defaultTopP.toString()) }
     var maxTok by remember { mutableStateOf(s.defaultMaxTokens.toString()) }
     var template by remember { mutableStateOf(s.chatTemplate) }
+    var requireAuth by remember { mutableStateOf(s.requireAuth) }
+    var manualDecodeThreads by remember { mutableStateOf(s.manualDecodeThreads.toString()) }
+    var manualPrefillThreads by remember { mutableStateOf(s.manualPrefillThreads.toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -362,6 +365,22 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
                     Switch(checked = autoStart, onCheckedChange = { autoStart = it })
                     Spacer(Modifier.width(8.dp))
                     Text("Auto-start on boot")
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = requireAuth, onCheckedChange = { requireAuth = it })
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text("Require API key")
+                        Text("Reject requests without a valid key", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Thread override (0 = auto-detect)", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = manualDecodeThreads, onValueChange = { manualDecodeThreads = it.filter { c -> c.isDigit() } }, label = { Text("Decode") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = manualPrefillThreads, onValueChange = { manualPrefillThreads = it.filter { c -> c.isDigit() } }, label = { Text("Prefill") }, singleLine = true, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
@@ -407,7 +426,10 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
                     defaultTemperature = temp.toFloatOrNull() ?: 0.7f,
                     defaultTopP = topP.toFloatOrNull() ?: 0.9f,
                     defaultMaxTokens = maxTok.toIntOrNull() ?: 512,
-                    chatTemplate = template
+                    chatTemplate = template,
+                    requireAuth = requireAuth,
+                    manualDecodeThreads = manualDecodeThreads.toIntOrNull() ?: 0,
+                    manualPrefillThreads = manualPrefillThreads.toIntOrNull() ?: 0
                 ))
             }) { Text("Save") }
         },

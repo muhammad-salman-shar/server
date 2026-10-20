@@ -11,7 +11,10 @@ data class AppSettings(
     val defaultTemperature: Float = 0.7f,
     val defaultTopP: Float = 0.9f,
     val defaultMaxTokens: Int = 512,
-    val chatTemplate: String = "auto"
+    val chatTemplate: String = "auto",
+    val requireAuth: Boolean = false,
+    val manualDecodeThreads: Int = 0,
+    val manualPrefillThreads: Int = 0
 ) {
     companion object {
         private const val PREFS = "samu_settings"
@@ -23,6 +26,9 @@ data class AppSettings(
         private const val K_TOPP = "top_p"
         private const val K_MAXTOK = "max_tokens"
         private const val K_TEMPLATE = "template"
+        private const val K_REQUIRE_AUTH = "require_auth"
+        private const val K_MANUAL_DECODE = "manual_decode"
+        private const val K_MANUAL_PREFILL = "manual_prefill"
 
         fun load(ctx: Context): AppSettings {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -34,7 +40,10 @@ data class AppSettings(
                 defaultTemperature = p.getFloat(K_TEMP, 0.7f),
                 defaultTopP = p.getFloat(K_TOPP, 0.9f),
                 defaultMaxTokens = p.getInt(K_MAXTOK, 512),
-                chatTemplate = p.getString(K_TEMPLATE, "auto") ?: "auto"
+                chatTemplate = p.getString(K_TEMPLATE, "auto") ?: "auto",
+                requireAuth = p.getBoolean(K_REQUIRE_AUTH, false),
+                manualDecodeThreads = p.getInt(K_MANUAL_DECODE, 0),
+                manualPrefillThreads = p.getInt(K_MANUAL_PREFILL, 0)
             )
         }
 
@@ -49,6 +58,9 @@ data class AppSettings(
                 putFloat(K_TOPP, s.defaultTopP)
                 putInt(K_MAXTOK, s.defaultMaxTokens)
                 putString(K_TEMPLATE, s.chatTemplate)
+                putBoolean(K_REQUIRE_AUTH, s.requireAuth)
+                putInt(K_MANUAL_DECODE, s.manualDecodeThreads)
+                putInt(K_MANUAL_PREFILL, s.manualPrefillThreads)
             }
         }
     }

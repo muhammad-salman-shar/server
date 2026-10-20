@@ -14,6 +14,7 @@ class SamuHttpServer(
 ) : NanoHTTPD(hostname, port) {
 
     @Volatile var validKeys: Set<String> = emptySet()
+    @Volatile var requireAuth: Boolean = false
     @Volatile var onRequest: ((String?) -> Unit)? = null
     @Volatile var displayNameOverride: String? = null
 
@@ -47,7 +48,8 @@ class SamuHttpServer(
     }
 
     private fun checkAuth(session: IHTTPSession): Boolean {
-        if (validKeys.isEmpty()) return true  // no keys = auth disabled
+        if (!requireAuth) return true  // auth explicitly disabled
+        if (validKeys.isEmpty()) return false  // auth ON but no keys — reject all
         val h = session.headers["authorization"] ?: return false
         val presented = h.removePrefix("Bearer ").trim()
         val ok = validKeys.contains(presented)

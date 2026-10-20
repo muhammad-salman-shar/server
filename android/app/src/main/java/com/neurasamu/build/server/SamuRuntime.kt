@@ -29,6 +29,7 @@ object SamuRuntime {
             .filter { it.enabled && it.key.isNotBlank() }
             .map { it.key }.toSet()
         http?.validKeys = keys
+        http?.requireAuth = settings.requireAuth
     }
 
     fun http(ctx: Context): SamuHttpServer {
@@ -37,6 +38,7 @@ object SamuRuntime {
                 .filter { k -> k.enabled && k.key.isNotBlank() }
                 .map { k -> k.key }.toSet()
             it.validKeys = keys
+            it.requireAuth = settings.requireAuth
             return it
         }
         synchronized(this) {
@@ -49,6 +51,7 @@ object SamuRuntime {
                 .map { it.key }.toSet()
             val h = SamuHttpServer(ctx.applicationContext, port, hostname)
             h.validKeys = keys
+            h.requireAuth = settings.requireAuth
             http = h
             return h
         }
@@ -64,8 +67,8 @@ object SamuRuntime {
         SamuEngineRouter.load(
             ctx = ctx,
             modelFile = model.file,
-            threads = topology.decodeThreads,
-            threadsBatch = topology.prefillThreads,
+            threads = if (settings.manualDecodeThreads > 0) settings.manualDecodeThreads else topology.decodeThreads,
+            threadsBatch = if (settings.manualPrefillThreads > 0) settings.manualPrefillThreads else topology.prefillThreads,
             ctxSize = model.ctx,
             onToken = {}
         )
