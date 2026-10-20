@@ -697,3 +697,219 @@ Java_com_neurasamu_build_server_SamuEngine_nativeApplyChatTemplate(
     LOGI("Applied chat template, prompt len=%d", (int)result.size());
     return env->NewStringUTF(result.c_str());
 }
+
+// ============ MULTIMODAL (VISION) SUPPORT ============
+
+#include "mtmd.h"
+#include "mtmd-helper.h"
+
+static mtmd_context* g_mtmd = nullptr;
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_neurasamu_build_server_SamuEngine_nativeLoadMmproj(
+    JNIEnv* env, jobject thiz, jstring mmproj_path) {
+    if (!g_model) {
+        LOGE("Cannot load mmproj: model not loaded");
+        return JNI_FALSE;
+    }
+    if (g_mtmd) {
+        mtmd_free(g_mtmd);
+        g_mtmd = nullptr;
+    }
+
+    const char* path = env->GetStringUTFChars(mmproj_path, nullptr);
+    if (!path) return JNI_FALSE;
+
+    mtmd_context_params params = mtmd_context_params_default();
+    params.use_gpu = false;
+    params.print_timings = false;
+    params.n_threads = 4;
+    params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+
+    g_mtmd = mtmd_init_from_file(path, g_model, params);
+    env->ReleaseStringUTFChars(mmproj_path, path);
+
+    if (g_mtmd) {
+        LOGI("mmproj loaded: %s", path);
+    } else {
+        LOGE("mmproj init failed");
+    }
+    return g_mtmd ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_neurasamu_build_server_SamuEngine_nativeIsMmprojLoaded(
+    JNIEnv* env, jobject thiz) {
+    return g_mtmd ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neurasamu_build_server_SamuEngine_nativeFreeMmproj(
+    JNIEnv* env, jobject thiz) {
+    if (g_mtmd) {
+        mtmd_free(g_mtmd);
+        g_mtmd = nullptr;
+        LOGI("mmproj freed");
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_neurasamu_build_server_SamuEngine_nativeGenerateMultimodal(
+    JNIEnv* env, jobject thiz,
+    jstring prompt_with_marker,
+    jbyteArray rgb_data, jint width, jint height,
+    jlong max_tokens,
+    jdouble temperature, jdouble top_p, jlong top_k,
+    jdouble repeat_penalty, jdouble frequency_penalty, jdouble presence_penalty,
+    jlong repeat_last_n,
+    jlong seed,
+    jobject token_callback) {
+
+    if (!g_mtmd) {
+        jclass ex = env->FindClass("java/lang/IllegalStateException");
+        env->ThrowNew(ex, "mmproj not loaded");
+        return;
+    }
+    if (!g_ctx || !g_model || !g_vocab) {
+        jclass ex = env->FindClass("java/lang/IllegalStateException");
+        env->ThrowNew(ex, "Model/context not loaded");
+        return;
+    }
+
+    // Set callback
+    if (g_token_callback != nullptr) {
+        env->DeleteGlobalRef(g_token_callback);
+        g_token_callback = nullptr;
+    }
+    g_token_callback = env->NewGlobalRef(token_callback);
+    g_stop_flag = false;
+
+    // Clear KV cache
+    llama_memory_t mem = llama_get_memory(g_ctx);
+    if (mem) llama_memory_seq_rm(mem, 0, 0, -1);
+    g_n_past = 0;
+
+    // Build bitmap from RGB bytes
+    jsize data_len = env->GetArrayLength(rgb_data);
+    if (data_len < (jsize)(width * height * 3)) {
+        jclass ex = env->FindClass("java/lang/IllegalArgumentException");
+        env->ThrowNew(ex, "RGB data too small");
+        return;
+    }
+    jbyte* data = env->GetByteArrayElements(rgb_data, nullptr);
+    mtmd_bitmap* bitmap = mtmd_bitmap_init(
+        (uint32_t)width, (uint32_t)height, (const unsigned char*)data);
+    env->ReleaseByteArrayElements(rgb_data, data, JNI_ABORT);
+
+    // Prepare text input
+    const char* prompt = env->GetStringUTFChars(prompt_with_marker, nullptr);
+    mtmd_input_text text_in;
+    text_in.text = prompt;
+    text_in.text_len = strlen(prompt);
+    text_in.add_special = true;
+    text_in.parse_special = true;
+
+    // Tokenize
+    mtmd_input_chunks* chunks = mtmd_input_chunks_init();
+    const mtmd_bitmap* bitmaps[1] = { bitmap };
+    int32_t tok_res = mtmd_tokenize(g_mtmd, chunks, &text_in, bitmaps, 1);
+    env->ReleaseStringUTFChars(prompt_with_marker, prompt);
+
+    if (tok_res != 0) {
+        mtmd_bitmap_free(bitmap);
+        mtmd_input_chunks_free(chunks);
+        jclass ex = env->FindClass("java/lang/RuntimeException");
+        env->ThrowNew(ex, "mtmd_tokenize failed");
+        return;
+    }
+
+    // Eval chunks (populates KV cache with image + text)
+    llama_pos new_n_past = 0;
+    int32_t eval_res = mtmd_helper_eval_chunks(
+        g_mtmd, g_ctx, chunks, 0, 0, 512, true, &new_n_past);
+
+    mtmd_bitmap_free(bitmap);
+    mtmd_input_chunks_free(chunks);
+
+    if (eval_res != 0) {
+        jclass ex = env->FindClass("java/lang/RuntimeException");
+        env->ThrowNew(ex, "mtmd eval failed");
+        return;
+    }
+
+    g_n_past = new_n_past;
+    LOGI("Multimodal eval done, n_past=%d, starting generation", (int)g_n_past);
+
+    // Build sampler chain
+    llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
+    if (g_sampler) {
+        llama_sampler_free(g_sampler);
+        g_sampler = nullptr;
+    }
+    g_sampler = llama_sampler_chain_init(sparams);
+
+    if (repeat_penalty != 1.0f || frequency_penalty != 0.0f || presence_penalty != 0.0f) {
+        llama_sampler_chain_add(g_sampler, llama_sampler_init_penalties(
+            (int32_t)llama_vocab_n_tokens(g_vocab),
+            repeat_last_n,
+            repeat_penalty,
+            frequency_penalty,
+            presence_penalty
+        ));
+    }
+    llama_sampler_chain_add(g_sampler, llama_sampler_init_temp(temperature));
+    if (top_p > 0.0f && top_p < 1.0f) {
+        llama_sampler_chain_add(g_sampler, llama_sampler_init_top_p(top_p, 1));
+    }
+    if (top_k > 0) {
+        llama_sampler_chain_add(g_sampler, llama_sampler_init_top_k(top_k));
+    }
+    llama_sampler_chain_add(g_sampler, llama_sampler_init_dist(
+        (uint32_t)(seed > 0 ? seed : 42)));
+
+    // Generation loop
+    int generated = 0;
+    const int n_ctx = llama_n_ctx(g_ctx);
+    jclass callbackClass = env->GetObjectClass(g_token_callback);
+    jmethodID invokeMethod = env->GetMethodID(
+        callbackClass, "invoke", "(Ljava/lang/Object;)Ljava/lang/Object;");
+
+    while (generated < max_tokens && !g_stop_flag) {
+        llama_token new_token = llama_sampler_sample(g_sampler, g_ctx, -1);
+
+        if (llama_vocab_is_eog(g_vocab, new_token)) {
+            LOGI("EOG reached at %d tokens", generated);
+            break;
+        }
+
+        char buf[256];
+        int n = llama_token_to_piece(g_vocab, new_token, buf, sizeof(buf), 0, true);
+        if (n > 0) {
+            std::string piece(buf, n);
+            jstring jpiece = env->NewStringUTF(piece.c_str());
+            env->CallObjectMethod(g_token_callback, invokeMethod, jpiece);
+            env->DeleteLocalRef(jpiece);
+        }
+
+        llama_batch batch = llama_batch_get_one(&new_token, 1);
+        if (llama_decode(g_ctx, batch) != 0) break;
+
+        g_n_past++;
+        generated++;
+        llama_sampler_accept(g_sampler, new_token);
+
+        if (g_n_past >= n_ctx - 4) break;
+    }
+
+    if (g_sampler) {
+        llama_sampler_free(g_sampler);
+        g_sampler = nullptr;
+    }
+    if (g_token_callback) {
+        env->DeleteGlobalRef(g_token_callback);
+        g_token_callback = nullptr;
+    }
+    env->DeleteLocalRef(callbackClass);
+
+    LOGI("Multimodal generation complete: %d tokens", generated);
+}
