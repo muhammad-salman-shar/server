@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -411,8 +412,8 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
     var maxTok by remember { mutableStateOf(s.defaultMaxTokens.toString()) }
     var template by remember { mutableStateOf(s.chatTemplate) }
     var requireAuth by remember { mutableStateOf(s.requireAuth) }
-    var manualDecodeThreads by remember { mutableStateOf(s.manualDecodeThreads.toString()) }
-    var manualPrefillThreads by remember { mutableStateOf(s.manualPrefillThreads.toString()) }
+
+    val ctx = LocalContext.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -444,30 +445,42 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
                         Text("Require API key")
                         Text("Reject requests without a valid key", style = MaterialTheme.typography.bodySmall)
                     }
-                }, label = { Text("Decode") }, singleLine = true, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = manualPrefillThreads, onValueChange = { manualPrefillThreads = it.filter { c -> c.isDigit() } }, label = { Text("Prefill") }, singleLine = true, modifier = Modifier.weight(1f))
                 }
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(16.dp))
+                Text("Battery & Background", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Text("Disable battery optimization so Android does not kill the server in the background.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            intent.data = android.net.Uri.parse("package:" + ctx.packageName)
+                            ctx.startActivity(intent)
+                        } catch (_: Exception) {}
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Request Battery Exemption") }
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
                 Text("Generation defaults", fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
-                OutlinedTextField(value = parallel,
-                    onValueChange = { parallel = it.filter { c -> c.isDigit() } },
-                    label = { Text("Parallel slots (1-4)") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = parallel, onValueChange = { parallel = it.filter { c -> c.isDigit() } },
+                    label = { Text("Parallel slots (1-4)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = temp, onValueChange = { temp = it },
-                    label = { Text("Temperature") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth())
+                    label = { Text("Temperature") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = topP, onValueChange = { topP = it },
-                    label = { Text("Top-P") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth())
+                    label = { Text("Top-P") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = maxTok, onValueChange = { maxTok = it.filter { c -> c.isDigit() } },
-                    label = { Text("Max tokens") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth())
+                    label = { Text("Max tokens") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
@@ -492,14 +505,13 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
                     defaultTopP = topP.toFloatOrNull() ?: 0.9f,
                     defaultMaxTokens = maxTok.toIntOrNull() ?: 512,
                     chatTemplate = template,
-                    requireAuth = requireAuth,
-                    manualDecodeThreads = manualDecodeThreads.toIntOrNull() ?: 0,
-                    manualPrefillThreads = manualPrefillThreads.toIntOrNull() ?: 0
+                    requireAuth = requireAuth
                 ))
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
 
 @Composable
 private fun ApiKeysDialog(keys: List<ApiKey>, onAdd: (String) -> Unit,
