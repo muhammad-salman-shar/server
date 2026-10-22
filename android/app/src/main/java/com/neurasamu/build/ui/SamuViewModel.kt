@@ -81,6 +81,40 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
+    fun updateModelSettings(m: SamuModel, category: com.neurasamu.build.model.ModelCategory, mmprojPathInput: String?, mmprojEnabled: Boolean, ctx: Int, threads: Int) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, busyLabel = "Saving settings…")
+            try {
+                val finalPath = withContext(Dispatchers.IO) {
+                    if (mmprojPathInput == null) null
+                    else if (mmprojPathInput.startsWith("content://")) {
+                        // Copy the content URI to models dir
+                        val uri = android.net.Uri.parse(mmprojPathInput)
+                        ModelStore.copyExtraFile(getApplication(), uri, m.file.name)
+                    } else mmprojPathInput
+                }
+                val updated = m.copy(
+                    category = category,
+                    mmprojPath = finalPath,
+                    mmprojEnabled = mmprojEnabled,
+                    ctx = ctx,
+                    threads = threads
+                )
+                ModelStore.updateMeta(getApplication(), updated)
+                refresh()
+                _state.value = _state.value.copy(busy = false, busyLabel = "",
+                    message = "Settings saved")
+                if (_state.value.active?.id == m.id) {
+                    val fresh = ModelStore.list(getApplication()).firstOrNull { it.id == m.id }
+                    if (fresh != null) _state.value = _state.value.copy(active = fresh)
+                }
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(busy = false, busyLabel = "",
+                    errorDetail = "Settings save failed: ${e.message}")
+            }
+        }
+    }
+
     fun loadModel(m: SamuModel) {
         viewModelScope.launch {
             _state.value = _state.value.copy(

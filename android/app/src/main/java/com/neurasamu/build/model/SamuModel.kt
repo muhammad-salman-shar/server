@@ -52,6 +52,7 @@ data class SamuModel(
     val family: ModelFamily = ModelFamily.fromName(file.nameWithoutExtension),
     val category: ModelCategory = ModelCategory.TEXT,
     val mmprojPath: String? = null,
+    val mmprojEnabled: Boolean = true,
     val ctx: Int = 2048,
     val threads: Int = 4
 ) {

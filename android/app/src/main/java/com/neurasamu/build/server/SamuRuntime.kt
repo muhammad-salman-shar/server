@@ -72,15 +72,17 @@ object SamuRuntime {
             ctxSize = model.ctx,
             onToken = {}
         )
-        // Load mmproj (vision/audio projector) if configured for this model
+        // Load mmproj (vision/audio projector) only if enabled and configured
         try {
             SamuEngine.freeMmproj()
             val mmprojPath = model.mmprojPath
-            if (mmprojPath != null && java.io.File(mmprojPath).exists()) {
+            if (!model.mmprojEnabled) {
+                android.util.Log.i("SamuRuntime", "mmproj disabled for this model — text-only mode")
+            } else if (mmprojPath != null && java.io.File(mmprojPath).exists()) {
                 val ok = SamuEngine.loadMmproj(mmprojPath)
                 android.util.Log.i("SamuRuntime", "mmproj loaded=$ok from $mmprojPath")
             } else {
-                android.util.Log.i("SamuRuntime", "No mmproj — text-only mode")
+                android.util.Log.i("SamuRuntime", "No mmproj configured — text-only mode")
             }
         } catch (e: Exception) {
             android.util.Log.w("SamuRuntime", "mmproj load failed: ${e.message}")

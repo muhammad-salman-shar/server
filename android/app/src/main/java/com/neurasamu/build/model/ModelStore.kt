@@ -62,12 +62,24 @@ object ModelStore {
         }
 
         val model = buildModel(dest, category, mmprojPath)
-        saveMeta(dest, category, mmprojPath)
+        saveMeta(dest, category, mmprojPath, true, 2048, 4)
         model
     }
 
-    fun updateMeta(ctx: Context, model: SamuModel, category: ModelCategory, mmprojPath: String?) {
-        saveMeta(model.file, category, mmprojPath)
+    fun updateMeta(ctx: Context, model: SamuModel) {
+        saveMeta(model.file, model.category, model.mmprojPath, model.mmprojEnabled, model.ctx, model.threads)
+    }
+
+    fun copyExtraFile(ctx: Context, uri: Uri, baseName: String): String? {
+        return try {
+            val name = queryName(ctx, uri) ?: "mmproj-$baseName"
+            val safeName = if (name.endsWith(".gguf", true)) name else "$name.gguf"
+            val dest = File(modelsDir(ctx), safeName)
+            ctx.contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output, 1 shl 20) }
+            } ?: return null
+            dest.absolutePath
+        } catch (_: Exception) { null }
     }
 
     fun delete(ctx: Context, model: SamuModel) {
@@ -88,15 +100,20 @@ object ModelStore {
     ): SamuModel {
         val meta = loadMeta(file)
         val category = categoryOverride ?: meta?.first ?: ModelCategory.TEXT
-        val mmproj = mmprojOverride ?: meta?.second
-            ?: findSiblingMmproj(file)
+        val mmproj = mmprojOverride ?: meta?.second ?: findSiblingMmproj(file)
+        val mmprojEnabled = meta?.third ?: true
+        val ctx = meta?.fourth ?: 2048
+        val threads = meta?.fifth ?: 4
         return SamuModel(
             id = file.nameWithoutExtension,
             displayName = file.nameWithoutExtension,
             file = file,
             sizeBytes = file.length(),
             category = category,
-            mmprojPath = mmproj
+            mmprojPath = mmproj,
+            mmprojEnabled = mmprojEnabled,
+            ctx = ctx,
+            threads = threads
         )
     }
 
@@ -111,26 +128,34 @@ object ModelStore {
     private fun metaFile(modelFile: File): File =
         File(modelFile.parentFile, modelFile.name + META_SUFFIX)
 
-    private fun saveMeta(modelFile: File, category: ModelCategory, mmprojPath: String?) {
+    private fun saveMeta(modelFile: File, category: ModelCategory, mmprojPath: String?, mmprojEnabled: Boolean, ctx: Int, threads: Int) {
         try {
             val obj = JSONObject().apply {
                 put("category", category.name)
                 if (mmprojPath != null) put("mmproj", mmprojPath)
+                put("mmprojEnabled", mmprojEnabled)
+                put("ctx", ctx)
+                put("threads", threads)
             }
             metaFile(modelFile).writeText(obj.toString())
         } catch (_: Exception) {}
     }
 
-    private fun loadMeta(modelFile: File): Pair<ModelCategory, String?>? {
+    private fun loadMeta(modelFile: File): Quintuple<ModelCategory, String?, Boolean, Int, Int>? {
         return try {
             val f = metaFile(modelFile)
             if (!f.exists()) return null
             val obj = JSONObject(f.readText())
             val cat = ModelCategory.fromName(obj.optString("category", "")) ?: ModelCategory.TEXT
             val mmproj = obj.optString("mmproj", "").takeIf { it.isNotBlank() }
-            cat to mmproj
+            val mmprojEnabled = obj.optBoolean("mmprojEnabled", true)
+            val ctx = obj.optInt("ctx", 2048)
+            val threads = obj.optInt("threads", 4)
+            Quintuple(cat, mmproj, mmprojEnabled, ctx, threads)
         } catch (_: Exception) { null }
     }
+    
+    data class Quintuple<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
     private fun ensureExt(name: String): String {
         val lc = name.lowercase()

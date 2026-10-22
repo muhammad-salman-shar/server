@@ -43,10 +43,12 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
     val scope = rememberCoroutineScope()
     var showSelfTest by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     var showApiKeys by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var showLoadDialog by remember { mutableStateOf(false) }
     var importUri by remember { mutableStateOf<Uri?>(null) }
+    var settingsModel by remember { mutableStateOf<SamuModel?>(null) }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -78,7 +80,7 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
                 }
                 DrawerItem("About", Icons.Default.Info) {
                     scope.launch { drawerState.close() }
-                    showSettings = true
+                    showAbout = true
                 }
             }
         }
@@ -121,21 +123,41 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
                 Text("Models", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))
                 val categoryGrouped = remember(state.models) { state.models.groupBy { it.category } }
+                val expandedCats = remember { androidx.compose.runtime.mutableStateMapOf<ModelCategory, Boolean>() }
+                
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     categoryGrouped.forEach { (cat, models) ->
+                        val isExpanded = expandedCats[cat] ?: true
                         item(key = "h-" + cat.name) {
-                            Text(
-                                cat.label + " (" + models.size + ")",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { expandedCats[cat] = !isExpanded }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    cat.label + " (" + models.size + ")",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
-                        items(models, key = { it.id }) { m ->
-                            ModelRow(m, state.active?.id == m.id, vm)
+                        if (isExpanded) {
+                            items(models, key = { it.id }) { m ->
+                                ModelRow(m, state.active?.id == m.id, vm, onSettings = { settingsModel = m })
+                            }
                         }
                     }
                 }
@@ -181,6 +203,16 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
             onDismiss = { showLoadDialog = false }
         )
     }
+    settingsModel?.let { model ->
+        ModelSettingsDialog(
+            model = model,
+            onSave = { cat, mmproj, enabled, ctx, threads ->
+                vm.updateModelSettings(model, cat, mmproj, enabled, ctx, threads)
+                settingsModel = null
+            },
+            onDismiss = { settingsModel = null }
+        )
+    }
 }
 
 @Composable
@@ -222,7 +254,7 @@ private fun ServerCard(s: UiState, vm: SamuViewModel, ctx: Context, onManageKeys
                 OutlinedTextField(
                     value = s.modelName,
                     onValueChange = vm::updateModelName,
-                    label = { Text("Model name (API)") },
+                    label = { Text("Model name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -312,15 +344,15 @@ private fun CopyRow(label: String, value: String, ctx: Context) {
 }
 
 @Composable
-private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel) {
+private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel, onSettings: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             else MaterialTheme.colorScheme.surface
         ),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(14.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(m.displayName, fontWeight = FontWeight.Medium,
@@ -332,8 +364,13 @@ private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel) {
                     style = MaterialTheme.typography.labelSmall)
             }
             TextButton(onClick = { vm.loadModel(m) }) { Text("Load", style = MaterialTheme.typography.labelMedium) }
+            IconButton(onClick = onSettings, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Settings, "settings", Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            }
             IconButton(onClick = { vm.deleteModel(m) }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Delete, null, Modifier.size(18.dp))
+                Icon(Icons.Default.Delete, null, Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -381,7 +418,7 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
         onDismissRequest = onDismiss,
         title = { Text("Server settings") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 500.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 600.dp)) {
                 OutlinedTextField(value = port, onValueChange = { port = it.filter { c -> c.isDigit() } },
                     label = { Text("Port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
@@ -407,12 +444,7 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
                         Text("Require API key")
                         Text("Reject requests without a valid key", style = MaterialTheme.typography.bodySmall)
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("Thread override (0 = auto-detect)", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = manualDecodeThreads, onValueChange = { manualDecodeThreads = it.filter { c -> c.isDigit() } }, label = { Text("Decode") }, singleLine = true, modifier = Modifier.weight(1f))
+                }, label = { Text("Decode") }, singleLine = true, modifier = Modifier.weight(1f))
                     OutlinedTextField(value = manualPrefillThreads, onValueChange = { manualPrefillThreads = it.filter { c -> c.isDigit() } }, label = { Text("Prefill") }, singleLine = true, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(12.dp))
@@ -468,7 +500,6 @@ private fun SettingsDialog(s: AppSettings, onSave: (AppSettings) -> Unit,
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
-}
 
 @Composable
 private fun ApiKeysDialog(keys: List<ApiKey>, onAdd: (String) -> Unit,
@@ -481,7 +512,7 @@ private fun ApiKeysDialog(keys: List<ApiKey>, onAdd: (String) -> Unit,
         onDismissRequest = onDismiss,
         title = { Text("API keys") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 500.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 600.dp)) {
                 Text("Empty list = no auth required", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 keys.forEach { k ->
