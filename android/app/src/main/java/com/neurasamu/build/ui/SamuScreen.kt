@@ -6,6 +6,8 @@ import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neurasamu.build.data.ApiKey
 import com.neurasamu.build.data.AppSettings
+import com.neurasamu.build.model.ModelCategory
 import com.neurasamu.build.model.SamuModel
 import kotlinx.coroutines.launch
 
@@ -41,10 +44,13 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
     var showSelfTest by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showApiKeys by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var showLoadDialog by remember { mutableStateOf(false) }
+    var importUri by remember { mutableStateOf<Uri?>(null) }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let { vm.importModel(it) } }
+    ) { uri -> uri?.let { importUri = it; showImportDialog = true } }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -92,11 +98,19 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
                 )
             },
             floatingActionButton = {
-                ExtendedFloatingActionButton(
-                    onClick = { picker.launch(arrayOf("*/*")) },
-                    icon = { Icon(Icons.Default.Add, null) },
-                    text = { Text("Add model") }
-                )
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ExtendedFloatingActionButton(
+                        onClick = { showLoadDialog = true },
+                        icon = { Icon(Icons.Default.PlayArrow, null) },
+                        text = { Text("Load Model") },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                    ExtendedFloatingActionButton(
+                        onClick = { picker.launch(arrayOf("*/*")) },
+                        icon = { Icon(Icons.Default.Add, null) },
+                        text = { Text("Add Model") }
+                    )
+                }
             }
         ) { pad ->
             Column(
@@ -106,18 +120,18 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
                 Spacer(Modifier.height(12.dp))
                 Text("Models", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))
-                val grouped = state.models.groupBy { it.family }
+                val categoryGrouped = remember(state.models) { state.models.groupBy { it.category } }
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    grouped.forEach { (family, models) ->
-                        item(key = "h-" + family.name) {
+                    categoryGrouped.forEach { (cat, models) ->
+                        item(key = "h-" + cat.name) {
                             Text(
-                                family.label + " (" + models.size + ")",
-                                style = MaterialTheme.typography.titleSmall,
+                                cat.label + " (" + models.size + ")",
+                                style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 4.dp)
+                                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
                             )
                         }
                         items(models, key = { it.id }) { m ->
@@ -151,6 +165,21 @@ fun SamuRoot(vm: SamuViewModel = viewModel()) {
         ApiKeysDialog(state.apiKeys, onAdd = vm::addApiKey,
             onDelete = vm::deleteApiKey, onToggle = vm::toggleApiKey,
             onDismiss = { showApiKeys = false })
+    }
+
+    if (showImportDialog && importUri != null) {
+        ImportModelDialog(
+            modelUri = importUri!!,
+            onImport = { cat, mmproj -> vm.importModel(importUri!!, cat, mmproj); showImportDialog = false; importUri = null },
+            onDismiss = { showImportDialog = false; importUri = null }
+        )
+    }
+    if (showLoadDialog) {
+        LoadModelDialog(
+            models = state.models,
+            onPick = { vm.loadModel(it); showLoadDialog = false },
+            onDismiss = { showLoadDialog = false }
+        )
     }
 }
 
@@ -289,34 +318,23 @@ private fun ModelRow(m: SamuModel, active: Boolean, vm: SamuViewModel) {
             containerColor = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             else MaterialTheme.colorScheme.surface
         ),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(8.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(12.dp),
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(m.displayName, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.width(6.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            "${m.type.emoji} ${m.type.label}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                Text("${m.family.label} · ${m.format.label} · %.1f MB".format(m.sizeBytes / 1_048_576.0),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                if (active) Text("ACTIVE", color = MaterialTheme.colorScheme.primary,
+                Text(m.displayName, fontWeight = FontWeight.Medium,
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                Text("%.0f MB · %s".format(m.sizeBytes / 1_048_576.0, m.format.label),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+                if (active) Text("● ACTIVE", color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelSmall)
             }
-            TextButton(onClick = { vm.loadModel(m) }) { Text("Load") }
-            IconButton(onClick = { vm.deleteModel(m) }) { Icon(Icons.Default.Delete, null) }
+            TextButton(onClick = { vm.loadModel(m) }) { Text("Load", style = MaterialTheme.typography.labelMedium) }
+            IconButton(onClick = { vm.deleteModel(m) }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Delete, null, Modifier.size(18.dp))
+            }
         }
     }
 }
@@ -503,3 +521,133 @@ private fun ApiKeysDialog(keys: List<ApiKey>, onAdd: (String) -> Unit,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }
+
+
+@Composable
+private fun ImportModelDialog(
+    modelUri: Uri,
+    onImport: (ModelCategory, Uri?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var category by remember { mutableStateOf(ModelCategory.TEXT) }
+    var mmprojUri by remember { mutableStateOf<Uri?>(null) }
+    var mmprojName by remember { mutableStateOf<String?>(null) }
+    val mmprojPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        mmprojUri = uri
+        mmprojName = uri?.lastPathSegment
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Model") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Category", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(4.dp))
+                ModelCategory.entries.forEach { c ->
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable { category = c }) {
+                        RadioButton(selected = category == c, onClick = { category = c })
+                        Column {
+                            Text(c.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(c.description, style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+                Text("Extra file (optional)", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(2.dp))
+                Text("e.g. mmproj-*.gguf for vision/audio models",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { mmprojPicker.launch(arrayOf("*/*")) }) {
+                        Text(if (mmprojUri == null) "Select mmproj" else "Change")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    if (mmprojUri != null) {
+                        Column(Modifier.weight(1f)) {
+                            Text(mmprojName ?: "selected",
+                                style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            Text("Clear", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clickable { mmprojUri = null; mmprojName = null })
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onImport(category, mmprojUri) }) { Text("Import") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun LoadModelDialog(
+    models: List<SamuModel>,
+    onPick: (SamuModel) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selectedCat by remember { mutableStateOf<ModelCategory?>(null) }
+    val filtered = if (selectedCat == null) emptyList() else models.filter { it.category == selectedCat }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (selectedCat == null) "Pick Category" else selectedCat!!.label) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 450.dp)) {
+                if (selectedCat == null) {
+                    ModelCategory.entries.forEach { c ->
+                        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedCat = c }) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(c.label, fontWeight = FontWeight.SemiBold)
+                                Text(c.description, style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            }
+                        }
+                    }
+                } else {
+                    if (filtered.isEmpty()) {
+                        Text("No models in this category.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    } else {
+                        filtered.forEach { m ->
+                            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { onPick(m) }) {
+                                Column(Modifier.padding(10.dp)) {
+                                    Text(m.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                    Text("%.0f MB · %s".format(m.sizeBytes / 1_048_576.0, m.format.label),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (selectedCat != null) {
+                TextButton(onClick = { selectedCat = null }) { Text("Back") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+        dismissButton = {
+            if (selectedCat != null) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
+}
+

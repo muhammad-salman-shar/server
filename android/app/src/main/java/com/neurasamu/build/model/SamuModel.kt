@@ -3,9 +3,9 @@ package com.neurasamu.build.model
 import java.io.File
 
 enum class ModelFormat(val label: String, val extensions: List<String>) {
-    GGUF("GGUF (llama.cpp)", listOf(".gguf")),
-    LITERT("LiteRT / MediaPipe", listOf(".litertlm", ".task", ".bin")),
-    CUSTOM("Custom / other", emptyList());
+    GGUF("GGUF", listOf(".gguf")),
+    LITERT("LiteRT", listOf(".litertlm", ".task", ".bin")),
+    CUSTOM("Other", emptyList());
 
     companion object {
         fun fromFileName(name: String): ModelFormat {
@@ -33,6 +33,16 @@ enum class ModelFamily(val label: String, val keywords: List<String>) {
     }
 }
 
+enum class ModelCategory(val label: String, val description: String) {
+    TEXT("Text Models", "Text generation, chat, multimodal understanding"),
+    GENERATION("Generation Models", "Text / image / video / audio generation"),
+    ANALYSIS("Analysis Models", "Image / video / audio / multimodal analysis");
+
+    companion object {
+        fun fromName(name: String): ModelCategory? = entries.firstOrNull { it.name == name }
+    }
+}
+
 data class SamuModel(
     val id: String,
     val displayName: String,
@@ -40,7 +50,8 @@ data class SamuModel(
     val sizeBytes: Long,
     val format: ModelFormat = ModelFormat.fromFileName(file.name),
     val family: ModelFamily = ModelFamily.fromName(file.nameWithoutExtension),
-    val type: SamuModelType = ModelInspector.detect(file),
+    val category: ModelCategory = ModelCategory.TEXT,
+    val mmprojPath: String? = null,
     val ctx: Int = 2048,
     val threads: Int = 4
 ) {

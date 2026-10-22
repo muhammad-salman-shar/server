@@ -8,6 +8,7 @@ import com.neurasamu.build.data.ApiKey
 import com.neurasamu.build.data.ApiKeyStore
 import com.neurasamu.build.data.AppSettings
 import com.neurasamu.build.engine.SamuEngineRouter
+import com.neurasamu.build.model.ModelCategory
 import com.neurasamu.build.model.ModelStore
 import com.neurasamu.build.model.SamuModel
 import com.neurasamu.build.server.CpuTopology
@@ -52,12 +53,12 @@ class SamuViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(models = list)
     }
 
-    fun importModel(uri: Uri) {
+    fun importModel(uri: Uri, category: com.neurasamu.build.model.ModelCategory, mmprojUri: Uri? = null) {
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, busyLabel = "Importing…",
                 message = null, errorDetail = null)
             try {
-                val m = ModelStore.import(getApplication(), uri)
+                val m = ModelStore.import(getApplication(), uri, category, mmprojUri)
                 _state.value = _state.value.copy(busy = false, busyLabel = "",
                     message = "Added ${m.displayName}")
                 refresh()
