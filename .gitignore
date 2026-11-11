@@ -28,3 +28,6 @@ samu.log
 
 # llama.cpp backup (temporary)
 android/app/src/main/cpp/llama.cpp.bak/
+
+# Local llama.cpp backup
+llama.cpp.old/
