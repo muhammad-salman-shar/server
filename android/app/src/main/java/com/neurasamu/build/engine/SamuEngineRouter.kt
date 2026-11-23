@@ -3,23 +3,27 @@ package com.neurasamu.build.engine
 import android.content.Context
 import android.util.Log
 import java.io.File
+import java.util.concurrent.locks.ReentrantLock
 
 /**
- * Picks the right inference backend based on file extension.
- * Currently: .gguf → llama.cpp (JNI), .litertlm/.task/.bin → LiteRT via MediaPipe.
+ * Routes inference calls cleanly to llama.cpp (GGUF) or MediaPipe LiteRT,
+ * guarded with a ReentrantLock so simultaneous local Chat + LAN requests never crash JNI.
  */
 object SamuEngineRouter {
-
     private const val TAG = "EngineRouter"
+    val inferenceLock = ReentrantLock(true)
 
     enum class Backend { GGUF, LITERT, UNSUPPORTED }
+
+    @Volatile
+    var active: Backend? = null
+        private set
 
     fun detect(modelFile: File): Backend {
         val name = modelFile.name.lowercase()
         return when {
             name.endsWith(".gguf") -> Backend.GGUF
-            name.endsWith(".litertlm") || name.endsWith(".task") ||
-                name.endsWith(".bin") -> Backend.LITERT
+            name.endsWith(".litertlm") || name.endsWith(".task") || name.endsWith(".bin") -> Backend.LITERT
             else -> Backend.UNSUPPORTED
         }
     }
@@ -30,30 +34,45 @@ object SamuEngineRouter {
         Backend.UNSUPPORTED -> "unsupported"
     }
 
-    @Volatile var active: Backend? = null
-        private set
-
-    fun load(ctx: Context, modelFile: File, threads: Int, threadsBatch: Int,
-             ctxSize: Int, onToken: (String) -> Unit) {
-        val b = detect(modelFile)
-        Log.i(TAG, "Loading ${modelFile.name} via $b")
-        when (b) {
-            Backend.GGUF -> {
-                GgufBridge.load(modelFile, threads, threadsBatch, ctxSize)
-                active = Backend.GGUF
+    fun load(
+        ctx: Context,
+        modelFile: File,
+        threads: Int,
+        threadsBatch: Int,
+        ctxSize: Int,
+        gpuLayers: Int = 0,
+        onProgress: ((Double) -> Unit)? = null
+    ) {
+        inferenceLock.lock()
+        try {
+            unloadUnlocked()
+            val b = detect(modelFile)
+            Log.i(TAG, "Loading ${modelFile.name} via $b (ctx=$ctxSize, t=$threads/$threadsBatch, ngl=$gpuLayers)")
+            when (b) {
+                Backend.GGUF -> {
+                    GgufBridge.load(modelFile, threads, threadsBatch, ctxSize, gpuLayers, onProgress)
+                    active = Backend.GGUF
+                }
+                Backend.LITERT -> {
+                    LiteRtBridge.load(ctx, modelFile, threads, ctxSize)
+                    active = Backend.LITERT
+                }
+                Backend.UNSUPPORTED -> throw IllegalArgumentException(
+                    "Unsupported LLM format: ${modelFile.name}"
+                )
             }
-            Backend.LITERT -> {
-                LiteRtBridge.load(ctx, modelFile, threads, ctxSize)
-                active = Backend.LITERT
-            }
-            Backend.UNSUPPORTED -> throw IllegalArgumentException(
-                "Unsupported model format: ${modelFile.name}"
-            )
+        } finally {
+            inferenceLock.unlock()
         }
     }
 
-    fun generate(prompt: String, maxTokens: Int, temperature: Double, topP: Double,
-                 onToken: (String) -> Unit) {
+    fun generate(
+        prompt: String,
+        maxTokens: Int,
+        temperature: Double,
+        topP: Double,
+        onToken: (String) -> Unit
+    ) {
         when (active) {
             Backend.GGUF -> GgufBridge.generate(prompt, maxTokens, temperature, topP, onToken)
             Backend.LITERT -> LiteRtBridge.generate(prompt, maxTokens, temperature, topP, onToken)
@@ -75,7 +94,7 @@ object SamuEngineRouter {
             Backend.GGUF -> GgufBridge.generateWithImage(
                 prompt, rgbData, width, height, maxTokens, temperature, topP, onToken
             )
-            else -> throw IllegalStateException("Vision not supported on this backend")
+            else -> throw IllegalStateException("Vision requires a GGUF model with mmproj attached")
         }
     }
 
@@ -92,11 +111,19 @@ object SamuEngineRouter {
             Backend.GGUF -> GgufBridge.generateWithAudio(
                 prompt, audioSamples, sampleRate, maxTokens, temperature, topP, onToken
             )
-            else -> throw IllegalStateException("Audio not supported on this backend")
+            else -> throw IllegalStateException("Audio input requires a GGUF model with mmproj attached")
         }
     }
 
+    fun loadMmproj(path: String): Boolean =
+        if (active == Backend.GGUF) GgufBridge.loadMmproj(path) else false
 
+    fun isMmprojLoaded(): Boolean =
+        if (active == Backend.GGUF) GgufBridge.isMmprojLoaded() else false
+
+    fun freeMmproj() {
+        if (active == Backend.GGUF) GgufBridge.freeMmproj()
+    }
 
     fun stop() {
         when (active) {
@@ -105,6 +132,7 @@ object SamuEngineRouter {
             else -> {}
         }
     }
+
     fun clearContext() {
         when (active) {
             Backend.GGUF -> GgufBridge.clearContext()
@@ -113,8 +141,17 @@ object SamuEngineRouter {
         }
     }
 
-
     fun unload() {
+        stop()
+        inferenceLock.lock()
+        try {
+            unloadUnlocked()
+        } finally {
+            inferenceLock.unlock()
+        }
+    }
+
+    private fun unloadUnlocked() {
         when (active) {
             Backend.GGUF -> GgufBridge.unload()
             Backend.LITERT -> LiteRtBridge.unload()
