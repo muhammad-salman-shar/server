@@ -10,7 +10,7 @@ object SamuEngine {
         System.loadLibrary("samu_jni")
     }
 
-    external fun nativeDetectGpu(outStats: LongArray): String
+    external fun nativeDetectGpu(outStats: LongArray): String?
 
     external fun nativeLoadModel(
         path: String,
@@ -206,7 +206,7 @@ object SamuEngine {
 
     fun detectGpu(): String {
         val stats = LongArray(8)
-        return try { nativeDetectGpu(stats) } catch (e: Throwable) {
+        return try { nativeDetectGpu(stats)?.takeIf { it.isNotBlank() } ?: "cpu-only" } catch (e: Throwable) {
             Log.w(TAG, "GPU detect failed: ${e.message}"); "cpu-only"
         }
     }

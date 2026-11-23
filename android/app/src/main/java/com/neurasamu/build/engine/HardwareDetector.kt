@@ -4,7 +4,6 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import com.neurasamu.build.server.SamuEngine
 import java.io.File
 
 data class HardwareProfile(
@@ -47,11 +46,8 @@ object HardwareDetector {
             "/system/lib64/libOpenCL.so"
         ).any { File(it).exists() }
 
-        val nativeGpu = try {
-            SamuEngine.detectGpu()
-        } catch (_: Throwable) {
-            "cpu-only"
-        }
+        // Avoid loading native libsamu_jni.so on cold start; llama.cpp runs CPU-only on Android
+        val nativeGpu = "cpu-only"
 
         val gpuActive = nativeGpu.isNotBlank() &&
             !nativeGpu.equals("cpu-only", ignoreCase = true) &&
