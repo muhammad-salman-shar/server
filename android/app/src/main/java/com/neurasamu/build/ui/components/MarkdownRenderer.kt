@@ -345,9 +345,7 @@ private fun parseMarkdownBlocks(raw: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     val lines = raw.replace("\r\n", "\n").split("\n")
     var i = 0
-    val orderedRegex = Regex("^(\\d+)\\.\\s+(.*)$")
-    val headingRegex = Regex("^(#{1,4})\\s+(.*)$")
-    val dividerRegex = Regex("^([-*_])\\1{2,}\\s*$")
+    // Uses precompiled regexes
 
     while (i < lines.size) {
         val line = lines[i]
@@ -378,14 +376,14 @@ private fun parseMarkdownBlocks(raw: String): List<MdBlock> {
         }
 
         // 2. Divider
-        if (dividerRegex.matches(trimmed)) {
+        if (MD_DIVIDER_REGEX.matches(trimmed)) {
             blocks.add(MdBlock.Divider)
             i++
             continue
         }
 
         // 3. Heading H1-H4
-        val hMatch = headingRegex.find(trimmed)
+        val hMatch = MD_HEADING_REGEX.find(trimmed)
         if (hMatch != null) {
             blocks.add(MdBlock.Heading(hMatch.groupValues[1].length, hMatch.groupValues[2].trim()))
             i++
@@ -431,10 +429,10 @@ private fun parseMarkdownBlocks(raw: String): List<MdBlock> {
         }
 
         // 7. Ordered list
-        if (orderedRegex.matches(trimmed)) {
+        if (MD_ORDERED_REGEX.matches(trimmed)) {
             val items = mutableListOf<Pair<String, String>>()
             while (i < lines.size) {
-                val m = orderedRegex.find(lines[i].trim()) ?: break
+                val m = MD_ORDERED_REGEX.find(lines[i].trim()) ?: break
                 items.add(m.groupValues[1] to m.groupValues[2].trim())
                 i++
             }
@@ -451,7 +449,7 @@ private fun parseMarkdownBlocks(raw: String): List<MdBlock> {
                 next.startsWith("```") || next.startsWith("~~~") ||
                 next.startsWith("#") || next.startsWith(">") ||
                 next.startsWith("- ") || next.startsWith("* ") ||
-                orderedRegex.matches(next) || dividerRegex.matches(next) ||
+                MD_ORDERED_REGEX.matches(next) || MD_DIVIDER_REGEX.matches(next) ||
                 (next.contains("|") && i + 1 < lines.size && isTableSeparator(lines[i + 1]))
             ) {
                 break
@@ -476,13 +474,17 @@ private fun isTableSeparator(line: String): Boolean {
 private fun splitTableRow(line: String): List<String> =
     line.trim().removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
 
+private val MD_ORDERED_REGEX = Regex("^(\\d+)\\.\\s+(.*)$")
+private val MD_HEADING_REGEX = Regex("^(#{1,4})\\s+(.*)$")
+private val MD_DIVIDER_REGEX = Regex("^([-*_])\\1{2,}\\s*$")
+private val MD_INLINE_REGEX = Regex(
+    """(`[^`]+`)|(\[[^\]]+]\(https?://[^)]+\))|(\*\*\*[^*]+\*\*\*)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)"""
+)
+
 private fun parseInlineMarkdown(text: String, colors: SaMuColors): AnnotatedString {
-    val tokenRegex = Regex(
-        """(`[^`]+`)|(\[[^\]]+]\(https?://[^)]+\))|(\*\*\*[^*]+\*\*\*)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)"""
-    )
     return buildAnnotatedString {
         var lastIdx = 0
-        for (match in tokenRegex.findAll(text)) {
+        for (match in MD_INLINE_REGEX.findAll(text)) {
             if (match.range.first > lastIdx) {
                 append(text.substring(lastIdx, match.range.first))
             }

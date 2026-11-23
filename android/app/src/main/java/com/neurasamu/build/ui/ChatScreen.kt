@@ -107,6 +107,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -326,6 +328,7 @@ fun ChatScreen(state: SaMuAppState) {
                 drawerContent = {
                     ModalDrawerSheet(
                         drawerContainerColor = colors.surface,
+                        windowInsets = WindowInsets(0),
                         modifier = Modifier.width(280.dp)
                     ) {
                         sidebarContent { scope.launch { drawerState.close() } }
@@ -893,8 +896,8 @@ private fun ChatTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = 6.dp),
+                .heightIn(min = 54.dp)
+                .padding(horizontal = 6.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onToggleSidebar, modifier = Modifier.size(40.dp)) {
@@ -1092,11 +1095,10 @@ private fun UserMessageItem(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.End
     ) {
-        BoxWithConstraints {
-            val maxBubbleW = maxWidth * 0.85f
-            Column(
-                modifier = Modifier
-                    .widthIn(max = maxBubbleW)
+        val maxBubbleW = LocalConfiguration.current.screenWidthDp.dp * 0.85f
+        Column(
+            modifier = Modifier
+                .widthIn(max = maxBubbleW)
                     .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp))
                     .background(colors.userBubble)
                     .border(
@@ -1143,7 +1145,6 @@ private fun UserMessageItem(
                     }
                 }
             }
-        }
 
         // User Icon-Only Action Bar (aligned END)
         Row(
@@ -1247,9 +1248,8 @@ private fun AssistantMessageItem(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start
     ) {
-        BoxWithConstraints {
-            val maxBubbleW = maxWidth * 0.85f
-            if (msg.isError) {
+        val maxBubbleW = LocalConfiguration.current.screenWidthDp.dp * 0.85f
+        if (msg.isError) {
                 Column(
                     modifier = Modifier
                         .widthIn(max = maxBubbleW)
@@ -1381,7 +1381,6 @@ private fun AssistantMessageItem(
                     }
                 }
             }
-        }
 
         // Assistant Icon-Only Action Bar (aligned START)
         if (!msg.isError && !isStreaming && (msg.content.isNotBlank() || msg.media != null)) {

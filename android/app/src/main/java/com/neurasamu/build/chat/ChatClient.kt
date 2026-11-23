@@ -137,7 +137,7 @@ object ChatClient {
 
         fun emitNow(force: Boolean = false) {
             val now = System.currentTimeMillis()
-            if (force || now - lastEmitMs >= 30L) {
+            if (force || now - lastEmitMs >= 50L) {
                 lastEmitMs = now
                 onUpdate(accumulated.toString())
             }

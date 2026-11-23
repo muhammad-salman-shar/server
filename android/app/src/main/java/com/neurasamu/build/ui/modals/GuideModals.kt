@@ -3,6 +3,7 @@ package com.neurasamu.build.ui.modals
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Warning
@@ -48,7 +50,7 @@ fun QuickGuideModal(onDismiss: () -> Unit) {
         "Thinking Effort & Live Skip" to "Pick Auto, Off, Low, High, Max, or Ultra in the top-left pill; tap 'Skip Thinking' mid-stream for an instant direct answer.",
         "Universal Offline File Attach" to "Attach images, PDFs, DOCX/XLSX/PPTX/EPUB, audio, or any code/text file — parsed 100% offline on device.",
         "Model Settings & mmproj" to "Tap the Tune icon on any model to set type (LLM/Image/Audio/Video), attach mmproj for Vision, or add VAE/CLIP/LoRA files.",
-        "Auto Native Context" to "Adding or loading a GGUF model reads its exact binary header context so models never crash from out-of-range context.",
+        "Smart Native Context" to "Adding or loading a GGUF model reads its exact binary header max context so models never crash from out-of-range context.",
         "This Device vs Other Device URLs" to "Use 127.0.0.1 locally or switch to Other Device to copy your Wi-Fi LAN URL and view the Setup Guide.",
         "Custom API Key Security" to "Enable Require API Key in Server Settings to lock all endpoints behind Bearer authentication.",
         "Real-Time Monitor" to "Watch active requests, live tokens/sec, total tokens, and color-coded engine logs on the Server tab."
@@ -132,43 +134,54 @@ fun ConnectOtherDeviceModal(
         when (selectedTab) {
             0 -> {
                 if (!lanAccess) {
-                    WarningBanner("LAN Access is OFF in Server Settings. Enable it and restart the server so other devices can reach this phone.")
+                    WarningBanner("LAN Access is OFF in Server Settings. Turn it ON and restart the server so other devices can reach this phone.")
                 }
                 if (lanIp == "127.0.0.1") {
                     WarningBanner("No Wi-Fi / Hotspot IP detected (currently 127.0.0.1). Connect both devices to the same Wi-Fi or turn on Mobile Hotspot, then tap Refresh IP.")
                 }
-                CopyableSnippetCard(
+
+                GuideStepsBox(
+                    steps = listOf(
+                        "Connect your phone and the other device (PC / phone / tablet) to the same Wi-Fi network, or turn on this phone's Mobile Hotspot.",
+                        "Keep SaMu Lab Server running with LAN Access ON (0.0.0.0).",
+                        "In your client app (SaMu Chat, Open WebUI, Continue, Cursor, Python OpenAI SDK), paste the Base URL below and use your active Model Name + API Key."
+                    )
+                )
+
+                CopyableCommandCard(
                     label = "OpenAI-Compatible Base URL",
                     code = "http://$lanIp:$port/v1",
                     onCopied = onCopied
                 )
-                CopyableSnippetCard(
-                    label = "Quick curl health check",
+                CopyableCommandCard(
+                    label = "Test connection from PC / Terminal",
                     code = "curl http://$lanIp:$port/health",
                     onCopied = onCopied
                 )
             }
 
             1 -> {
-                Text(
-                    text = "Connect this phone via USB cable with USB Debugging enabled, then run this command on your PC/laptop:",
-                    color = colors.textSecondary,
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp
+                GuideStepsBox(
+                    steps = listOf(
+                        "Enable Developer Options -> USB Debugging on this Android phone and plug it into your PC via USB cable.",
+                        "Run the ADB forward command below on your PC so your PC's localhost:$port tunnels directly into SaMu Lab over USB (no Wi-Fi needed!).",
+                        "Set your PC client Base URL to http://127.0.0.1:$port/v1."
+                    )
                 )
-                CopyableSnippetCard(
-                    label = "1. Forward port over USB (ADB)",
+
+                CopyableCommandCard(
+                    label = "Step 1 — Forward phone server to PC (run on PC)",
                     code = "adb forward tcp:$port tcp:$port",
                     onCopied = onCopied
                 )
-                CopyableSnippetCard(
-                    label = "Reverse (if laptop hosts client)",
-                    code = "adb reverse tcp:$port tcp:$port",
+                CopyableCommandCard(
+                    label = "Step 2 — Use this Base URL on your PC",
+                    code = "http://127.0.0.1:$port/v1",
                     onCopied = onCopied
                 )
-                CopyableSnippetCard(
-                    label = "2. Localhost Base URL on PC",
-                    code = "http://127.0.0.1:$port/v1",
+                CopyableCommandCard(
+                    label = "Optional — Reverse tunnel (if phone calls PC)",
+                    code = "adb reverse tcp:$port tcp:$port",
                     onCopied = onCopied
                 )
             }
@@ -177,23 +190,96 @@ fun ConnectOtherDeviceModal(
                 if (!requireAuth) {
                     WarningBanner("Security Warning: Require API Key is OFF! Turn on an API key in Server Settings before exposing your server over a public tunnel.")
                 }
-                CopyableSnippetCard(
-                    label = "SSH Quick Tunnel (localhost.run)",
+
+                GuideStepsBox(
+                    steps = listOf(
+                        "Use this option when your other device is on a different internet network (no shared Wi-Fi or USB).",
+                        "Open Termux on this phone and run either the SSH tunnel or Cloudflare quick tunnel command below.",
+                        "Copy the generated https://... URL from Termux and append /v1 as your Base URL on any remote device."
+                    )
+                )
+
+                CopyableCommandCard(
+                    label = "Option A — Zero-install SSH Tunnel (run in Termux)",
                     code = "ssh -R 80:127.0.0.1:$port nokey@localhost.run",
                     onCopied = onCopied
                 )
-                CopyableSnippetCard(
-                    label = "Cloudflare Quick Tunnel",
+                CopyableCommandCard(
+                    label = "Option B — Cloudflare Quick Tunnel (run in Termux)",
                     code = "cloudflared tunnel --url http://127.0.0.1:$port",
                     onCopied = onCopied
                 )
-                CopyableSnippetCard(
-                    label = "Private Mesh VPN (Tailscale / ZeroTier)",
-                    code = "http://<your-tailscale-ip>:$port/v1",
-                    onCopied = onCopied
+                GuideInfoCard(
+                    title = "Option C — Private Mesh VPN (Most Secure)",
+                    body = "Install Tailscale or ZeroTier on both devices. Use your phone's Tailscale IP with http://<tailscale-ip>:$port/v1 — encrypted end-to-end without exposing a public link."
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun GuideStepsBox(steps: List<String>) {
+    val colors = LocalSaMuColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SaMuRadius.sm)
+            .background(colors.background)
+            .border(1.dp, colors.divider, SaMuRadius.sm)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "HOW TO CONNECT",
+            color = colors.textTertiary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp
+        )
+        steps.forEachIndexed { idx, step ->
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(SaMuRadius.full)
+                        .background(colors.primary.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "${idx + 1}",
+                        color = colors.primary,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = step,
+                    color = colors.onSurface,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuideInfoCard(title: String, body: String) {
+    val colors = LocalSaMuColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SaMuRadius.sm)
+            .background(colors.background)
+            .border(1.dp, colors.divider, SaMuRadius.sm)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(title, color = colors.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(body, color = colors.textSecondary, fontSize = 11.5.sp, lineHeight = 16.sp)
     }
 }
 
@@ -216,7 +302,7 @@ private fun WarningBanner(text: String) {
 }
 
 @Composable
-private fun CopyableSnippetCard(
+private fun CopyableCommandCard(
     label: String,
     code: String,
     onCopied: (String) -> Unit
@@ -227,32 +313,46 @@ private fun CopyableSnippetCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(SaMuRadius.sm)
-            .background(colors.background)
             .border(1.dp, colors.divider, SaMuRadius.sm)
-            .padding(10.dp)
+            .background(colors.surfaceVariant)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(label, color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = label,
+                color = colors.onSurface,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
             IconButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(code))
                     onCopied("Copied to clipboard")
                 },
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(30.dp)
             ) {
                 Icon(Icons.Default.ContentCopy, "Copy", tint = colors.primary, modifier = Modifier.size(15.dp))
             }
         }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = code,
-            color = colors.codeText,
-            fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.codeBg)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp, vertical = 9.dp)
+        ) {
+            Text(
+                text = code,
+                color = colors.codeText,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
     }
 }

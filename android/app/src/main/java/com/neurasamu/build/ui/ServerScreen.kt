@@ -63,7 +63,9 @@ import com.neurasamu.build.data.AtomicStorage
 import com.neurasamu.build.data.ModelEntry
 import com.neurasamu.build.data.ModelKind
 import com.neurasamu.build.data.ServerRunState
+import androidx.compose.runtime.collectAsState
 import com.neurasamu.build.server.LogLevel
+import com.neurasamu.build.server.ServerMonitor
 import com.neurasamu.build.state.SaMuAppState
 import com.neurasamu.build.state.SaMuRepository
 import com.neurasamu.build.ui.modals.ConfirmDeleteModal
@@ -217,8 +219,15 @@ private fun ServerControlsCard(
         ServerRunState.STARTING -> colors.warning
         ServerRunState.STOPPED -> colors.textTertiary
     }
-    val statusLabel = when (state.serverState) {
-        ServerRunState.PROCESSING -> "Processing (${state.monitor.activeRequests} active)"
+    val mon by ServerMonitor.snapshot.collectAsState()
+    val effectiveState = when {
+        state.serverState == ServerRunState.STOPPED -> ServerRunState.STOPPED
+        state.serverState == ServerRunState.STARTING -> ServerRunState.STARTING
+        mon.activeRequests > 0 -> ServerRunState.PROCESSING
+        else -> ServerRunState.RUNNING
+    }
+    val statusLabel = when (effectiveState) {
+        ServerRunState.PROCESSING -> "Processing (${mon.activeRequests} active)"
         ServerRunState.RUNNING -> "Server Running"
         ServerRunState.STARTING -> "Starting Engine..."
         ServerRunState.STOPPED -> "Server Stopped"
@@ -551,7 +560,7 @@ private fun ModelsSectionCard(
                 } else {
                     Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("+ Add Model", fontSize = (12f * scale).sp, fontWeight = FontWeight.SemiBold)
+                    Text("Add Model", fontSize = (12f * scale).sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -722,15 +731,21 @@ private fun ModelBadge(text: String, bg: Color, fg: Color) {
 private fun RealTimeMonitorCard(state: SaMuAppState) {
     val colors = LocalSaMuColors.current
     val scale = LocalFontScale.current
-    val mon = state.monitor
+    val mon by ServerMonitor.snapshot.collectAsState()
+    val effectiveState = when {
+        state.serverState == ServerRunState.STOPPED -> ServerRunState.STOPPED
+        state.serverState == ServerRunState.STARTING -> ServerRunState.STARTING
+        mon.activeRequests > 0 -> ServerRunState.PROCESSING
+        else -> ServerRunState.RUNNING
+    }
 
-    val pillColor = when (state.serverState) {
+    val pillColor = when (effectiveState) {
         ServerRunState.PROCESSING -> colors.primary
         ServerRunState.RUNNING -> colors.success
         ServerRunState.STARTING -> colors.warning
         ServerRunState.STOPPED -> colors.textTertiary
     }
-    val pillText = when (state.serverState) {
+    val pillText = when (effectiveState) {
         ServerRunState.PROCESSING -> "Generating · ${String.format("%.1f", mon.liveTokensPerSec)} tok/s"
         ServerRunState.RUNNING -> "Idle — Ready"
         ServerRunState.STARTING -> "Starting..."

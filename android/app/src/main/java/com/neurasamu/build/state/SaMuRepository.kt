@@ -183,19 +183,7 @@ object SaMuRepository {
                 stopServer()
             }
 
-            scope.launch {
-                ServerMonitor.snapshot.collect { snap ->
-                    _state.update { cur ->
-                        val nextRunState = when {
-                            cur.serverState == ServerRunState.STOPPED -> ServerRunState.STOPPED
-                            cur.serverState == ServerRunState.STARTING -> ServerRunState.STARTING
-                            snap.activeRequests > 0 -> ServerRunState.PROCESSING
-                            else -> ServerRunState.RUNNING
-                        }
-                        cur.copy(monitor = snap, serverState = nextRunState)
-                    }
-                }
-            }
+            // ServerMonitor.snapshot is observed directly in isolated UI scopes to keep touch/scroll buttery smooth
 
             scope.launch {
                 refreshModels()
@@ -756,8 +744,11 @@ object SaMuRepository {
                     put(copied.absolutePath, newProfile)
                 }
 
-                // Auto-fill contextSize from GGUF nativeContext if available
-                val autoCtx = if (meta != null && meta.nativeContext > 0) meta.nativeContext else curSettings.contextSize
+                // Smart auto-fill: cap default context to device RAM-safe limit (user can tap Max in Server Settings anytime)
+                val hwRec = HardwareDetector.detect(appCtx).recommendedContext
+                val autoCtx = if (meta != null && meta.nativeContext > 0) {
+                    minOf(meta.nativeContext, hwRec)
+                } else curSettings.contextSize
                 val updatedSettings = curSettings.copy(
                     modelProfiles = updatedProfiles,
                     contextSize = autoCtx,
@@ -851,12 +842,14 @@ object SaMuRepository {
     // ==================== SERVER & ENGINE LIFECYCLE ====================
 
     fun loadModelAndStart(entry: ModelEntry) {
-        // Auto-fill context from GGUF nativeContext if available
+        // Smart auto-fill: cap default context to device RAM-safe limit so UI stays responsive on 8GB RAM
         val curSettings = _state.value.settings
         val nativeMax = entry.nativeContext
+        val hwRec = HardwareDetector.detect(appCtx).recommendedContext
+        val safeDefault = if (nativeMax > 0) minOf(nativeMax, hwRec) else curSettings.contextSize
         val autoCtx = when {
-            nativeMax > 0 && (curSettings.contextSize <= 0 || curSettings.contextSize > nativeMax) -> nativeMax
-            nativeMax > 0 && curSettings.activeModelPath != entry.path -> nativeMax
+            nativeMax > 0 && (curSettings.contextSize <= 0 || curSettings.contextSize > nativeMax) -> safeDefault
+            nativeMax > 0 && curSettings.activeModelPath != entry.path -> safeDefault
             else -> curSettings.contextSize
         }
         val updatedSettings = curSettings.copy(
